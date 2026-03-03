@@ -178,10 +178,8 @@ def _reconstruct_response(result_item: dict) -> SearchResponse:
         search_mode=result_item.get("search_mode"),
         query=result_item.get("query_text", ""),
         results=search_results,
-        total_results=len(search_results),
         latency_ms=result_item.get("latency_ms", 0),
         cost_usd=result_item.get("cost_usd", 0),
-        success=not result_item.get("error"),
         error=result_item.get("error"),
     )
 

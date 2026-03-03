@@ -133,15 +133,11 @@ class QueryGenerator:
         # Parse response
         content = response.content[0].text
 
-        # Extract JSON from response (handle markdown code blocks)
-        if "```json" in content:
-            content = content.split("```json")[1].split("```")[0]
-        elif "```" in content:
-            content = content.split("```")[1].split("```")[0]
-
         try:
-            data = json.loads(content)
-        except json.JSONDecodeError as e:
+            from searchprobe.utils.parsing import extract_json_from_llm_response
+
+            data = extract_json_from_llm_response(content)
+        except ValueError as e:
             print(f"Failed to parse LLM response: {e}")
             print(f"Content: {content[:500]}")
             return []

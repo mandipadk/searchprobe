@@ -37,16 +37,51 @@ class SearchResult(BaseModel):
         default=None, description="Original provider response for debugging"
     )
 
-    @classmethod
-    def from_url(cls, url: str | HttpUrl) -> "SearchResult":
-        """Extract domain from URL."""
-        url_str = str(url)
-        # Extract domain from URL
+    @staticmethod
+    def extract_domain(url: str | HttpUrl) -> str:
+        """Extract domain from URL.
+
+        Args:
+            url: URL string or HttpUrl object
+
+        Returns:
+            Domain string without www prefix
+        """
         from urllib.parse import urlparse
 
-        parsed = urlparse(url_str)
-        domain = parsed.netloc.replace("www.", "")
-        return domain
+        parsed = urlparse(str(url))
+        return parsed.netloc.replace("www.", "")
+
+    @classmethod
+    def from_url(
+        cls,
+        url: str | HttpUrl,
+        title: str = "",
+        snippet: str = "",
+        position: int = 0,
+        **kwargs: Any,
+    ) -> "SearchResult":
+        """Create a SearchResult from a URL.
+
+        Args:
+            url: Page URL
+            title: Page title
+            snippet: Short excerpt
+            position: Position in results
+            **kwargs: Additional fields
+
+        Returns:
+            SearchResult instance
+        """
+        domain = cls.extract_domain(url)
+        return cls(
+            title=title,
+            url=url,
+            snippet=snippet,
+            source_domain=domain,
+            position=position,
+            **kwargs,
+        )
 
 
 class SearchResponse(BaseModel):

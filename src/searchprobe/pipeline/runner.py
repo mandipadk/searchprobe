@@ -205,6 +205,9 @@ class BenchmarkRunner:
             self.cost_tracker.get_total_by_provider(),
         )
 
+        # Clean up providers
+        await self._cleanup_providers()
+
         # Calculate stats
         successful = len([r for r in results if r.success])
         failed = len([r for r in results if r.error])
@@ -251,6 +254,15 @@ class BenchmarkRunner:
                     )
 
         return tasks
+
+    async def _cleanup_providers(self) -> None:
+        """Clean up all provider resources."""
+        for provider in self._providers.values():
+            try:
+                await provider.close()
+            except Exception:
+                pass
+        self._providers.clear()
 
     async def _execute_search(self, task: QueryTask) -> SearchResponse:
         """Execute a single search task."""

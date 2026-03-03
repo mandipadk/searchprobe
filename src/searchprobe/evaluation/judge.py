@@ -222,23 +222,11 @@ class SearchJudge:
         Returns:
             Parsed evaluation data
         """
-        # Try to extract JSON from response
-        # Handle markdown code blocks
-        json_match = re.search(r"```(?:json)?\s*([\s\S]*?)```", response_text)
-        if json_match:
-            json_str = json_match.group(1).strip()
-        else:
-            # Try to find JSON object directly
-            json_match = re.search(r"\{[\s\S]*\}", response_text)
-            if json_match:
-                json_str = json_match.group(0)
-            else:
-                json_str = response_text
+        from searchprobe.utils.parsing import extract_json_from_llm_response
 
         try:
-            return json.loads(json_str)
-        except json.JSONDecodeError:
-            # Return empty evaluation on parse failure
+            return extract_json_from_llm_response(response_text)
+        except ValueError:
             return {
                 "scores": {},
                 "failure_modes": ["parse_error"],

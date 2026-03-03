@@ -45,12 +45,20 @@ from searchprobe.cli import generate as generate_module  # noqa: E402
 from searchprobe.cli import evaluate as evaluate_module  # noqa: E402
 from searchprobe.cli import report as report_module  # noqa: E402
 from searchprobe.cli import dashboard as dashboard_module  # noqa: E402
+from searchprobe.cli import geometry as geometry_module  # noqa: E402
+from searchprobe.cli import validate as validate_module  # noqa: E402
+from searchprobe.cli import perturb as perturb_module  # noqa: E402
+from searchprobe.cli import evolve as evolve_module  # noqa: E402
 
 app.add_typer(run_module.app, name="run")
 app.add_typer(generate_module.app, name="generate")
 app.add_typer(evaluate_module.app, name="evaluate")
 app.add_typer(report_module.app, name="report")
 app.add_typer(dashboard_module.app, name="dashboard")
+app.add_typer(geometry_module.app, name="geometry")
+app.add_typer(validate_module.app, name="validate")
+app.add_typer(perturb_module.app, name="perturb")
+app.add_typer(evolve_module.app, name="evolve")
 
 
 if __name__ == "__main__":

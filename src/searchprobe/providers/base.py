@@ -1,7 +1,7 @@
 """Abstract base class and protocol for search providers."""
 
 from abc import ABC, abstractmethod
-from typing import ClassVar
+from typing import ClassVar, Self
 
 from searchprobe.providers.models import SearchRequest, SearchResponse
 
@@ -11,6 +11,10 @@ class SearchProvider(ABC):
 
     Each provider must implement the search method and provide
     metadata about the provider (name, supported modes, costs).
+
+    Supports async context manager for proper resource cleanup:
+        async with provider as p:
+            result = await p.search(request)
     """
 
     # Provider metadata - override in subclasses
@@ -21,6 +25,18 @@ class SearchProvider(ABC):
     def __init__(self, api_key: str) -> None:
         """Initialize the provider with an API key."""
         self.api_key = api_key
+
+    async def __aenter__(self) -> Self:
+        """Enter async context manager."""
+        return self
+
+    async def __aexit__(self, exc_type: type | None, exc_val: Exception | None, exc_tb: object) -> None:
+        """Exit async context manager with cleanup."""
+        await self.close()
+
+    async def close(self) -> None:
+        """Clean up provider resources. Override in subclasses if needed."""
+        pass
 
     @property
     def name(self) -> str:

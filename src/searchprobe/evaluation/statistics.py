@@ -175,6 +175,89 @@ def cohens_d(scores_a: list[float], scores_b: list[float]) -> float:
     return float((mean_a - mean_b) / pooled_std)
 
 
+def bootstrap_confidence_interval(
+    scores: list[float],
+    confidence: float = 0.95,
+    n_bootstrap: int = 10000,
+    statistic: str = "mean",
+) -> ConfidenceInterval:
+    """Calculate bootstrap confidence interval.
+
+    Uses resampling to estimate CI without parametric assumptions.
+
+    Args:
+        scores: List of scores
+        confidence: Confidence level (default 0.95)
+        n_bootstrap: Number of bootstrap samples
+        statistic: Statistic to compute ('mean' or 'median')
+
+    Returns:
+        ConfidenceInterval from bootstrap resampling
+    """
+    if not scores:
+        return ConfidenceInterval(mean=0.0, lower=0.0, upper=0.0, confidence=confidence, n=0)
+
+    n = len(scores)
+    arr = np.array(scores)
+    stat_func = np.mean if statistic == "mean" else np.median
+    observed = float(stat_func(arr))
+
+    if n == 1:
+        return ConfidenceInterval(
+            mean=observed, lower=observed, upper=observed, confidence=confidence, n=1
+        )
+
+    rng = np.random.default_rng(42)
+    bootstrap_stats = np.array([
+        float(stat_func(rng.choice(arr, size=n, replace=True)))
+        for _ in range(n_bootstrap)
+    ])
+
+    alpha = 1 - confidence
+    lower = float(np.percentile(bootstrap_stats, 100 * alpha / 2))
+    upper = float(np.percentile(bootstrap_stats, 100 * (1 - alpha / 2)))
+
+    return ConfidenceInterval(
+        mean=observed, lower=lower, upper=upper, confidence=confidence, n=n
+    )
+
+
+def benjamini_hochberg(p_values: list[float], alpha: float = 0.05) -> list[bool]:
+    """Apply Benjamini-Hochberg procedure for multiple testing correction.
+
+    Controls the False Discovery Rate (FDR) at level alpha.
+
+    Args:
+        p_values: List of p-values from multiple tests
+        alpha: Desired FDR level (default 0.05)
+
+    Returns:
+        List of booleans indicating which tests are significant after correction
+    """
+    if not p_values:
+        return []
+
+    m = len(p_values)
+    # Sort p-values and track original indices
+    indexed = sorted(enumerate(p_values), key=lambda x: x[1])
+
+    significant = [False] * m
+    # Find the largest k such that p_(k) <= k/m * alpha
+    max_k = -1
+    for k, (orig_idx, p_val) in enumerate(indexed, 1):
+        threshold = (k / m) * alpha
+        if p_val <= threshold:
+            max_k = k
+
+    # All tests with rank <= max_k are significant
+    if max_k > 0:
+        for k in range(max_k):
+            orig_idx = indexed[k][0]
+            significant[orig_idx] = True
+
+    return significant
+
+
 def compare_providers(
     provider_a: str,
     scores_a: list[float],

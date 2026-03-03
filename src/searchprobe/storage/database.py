@@ -97,12 +97,62 @@ class Database:
         PRIMARY KEY (run_id, provider, category, dimension)
     );
 
+    -- Geometry Analysis Results
+    CREATE TABLE IF NOT EXISTS geometry_results (
+        id TEXT PRIMARY KEY,
+        model_name TEXT NOT NULL,
+        category TEXT NOT NULL,
+        adversarial_similarity REAL,
+        baseline_similarity REAL,
+        collapse_ratio REAL,
+        vulnerability_score REAL,
+        intrinsic_dimensionality REAL,
+        isotropy_score REAL,
+        pair_details TEXT,  -- JSON
+        timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+
+    -- Perturbation Results
+    CREATE TABLE IF NOT EXISTS perturbation_results (
+        id TEXT PRIMARY KEY,
+        run_id TEXT REFERENCES runs(id),
+        query_id TEXT REFERENCES queries(id),
+        provider TEXT NOT NULL,
+        operator TEXT NOT NULL,
+        original_query TEXT,
+        perturbed_query TEXT,
+        jaccard_similarity REAL,
+        rbo_score REAL,
+        original_results TEXT,  -- JSON
+        perturbed_results TEXT,  -- JSON
+        timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+
+    -- Cross-Encoder Validation Results
+    CREATE TABLE IF NOT EXISTS validation_results (
+        id TEXT PRIMARY KEY,
+        run_id TEXT REFERENCES runs(id),
+        query_id TEXT REFERENCES queries(id),
+        provider TEXT NOT NULL,
+        cross_encoder_model TEXT,
+        original_ndcg REAL,
+        reranked_ndcg REAL,
+        ndcg_improvement REAL,
+        kendall_tau REAL,
+        scores TEXT,  -- JSON
+        timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+
     -- Indexes for common queries
     CREATE INDEX IF NOT EXISTS idx_queries_category ON queries(category);
     CREATE INDEX IF NOT EXISTS idx_queries_query_set ON queries(query_set_id);
     CREATE INDEX IF NOT EXISTS idx_search_results_run ON search_results(run_id);
     CREATE INDEX IF NOT EXISTS idx_search_results_provider ON search_results(provider);
     CREATE INDEX IF NOT EXISTS idx_evaluations_run ON evaluations(run_id);
+    CREATE INDEX IF NOT EXISTS idx_evaluations_query_provider ON evaluations(query_id, provider);
+    CREATE INDEX IF NOT EXISTS idx_geometry_model_category ON geometry_results(model_name, category);
+    CREATE INDEX IF NOT EXISTS idx_perturbation_run ON perturbation_results(run_id);
+    CREATE INDEX IF NOT EXISTS idx_validation_run ON validation_results(run_id);
     """
 
     def __init__(self, db_path: str | Path = "searchprobe.db") -> None:
@@ -113,6 +163,7 @@ class Database:
     def _init_schema(self) -> None:
         """Create tables if they don't exist."""
         with self._get_connection() as conn:
+            conn.execute("PRAGMA journal_mode=WAL")
             conn.executescript(self.SCHEMA)
             conn.commit()
 
@@ -438,6 +489,150 @@ class Database:
                 if result.get("failure_mode"):
                     result["failure_modes"] = json.loads(result["failure_mode"])
                 results.append(result)
+            return results
+
+    # Geometry Operations
+    def add_geometry_result(self, result: dict[str, Any]) -> str:
+        """Store a geometry analysis result."""
+        result_id = str(uuid4())
+        with self._get_connection() as conn:
+            conn.execute(
+                """INSERT INTO geometry_results
+                   (id, model_name, category, adversarial_similarity,
+                    baseline_similarity, collapse_ratio, vulnerability_score,
+                    intrinsic_dimensionality, isotropy_score, pair_details)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    result_id,
+                    result["model_name"],
+                    result["category"],
+                    result.get("adversarial_similarity"),
+                    result.get("baseline_similarity"),
+                    result.get("collapse_ratio"),
+                    result.get("vulnerability_score"),
+                    result.get("intrinsic_dimensionality"),
+                    result.get("isotropy_score"),
+                    json.dumps(result.get("pair_details", {})),
+                ),
+            )
+            conn.commit()
+        return result_id
+
+    def get_geometry_results(
+        self, model_name: str | None = None, category: str | None = None
+    ) -> list[dict[str, Any]]:
+        """Get geometry analysis results."""
+        query = "SELECT * FROM geometry_results WHERE 1=1"
+        params: list[Any] = []
+        if model_name:
+            query += " AND model_name = ?"
+            params.append(model_name)
+        if category:
+            query += " AND category = ?"
+            params.append(category)
+        query += " ORDER BY timestamp DESC"
+        with self._get_connection() as conn:
+            rows = conn.execute(query, params).fetchall()
+            results = []
+            for row in rows:
+                r = dict(row)
+                if r.get("pair_details"):
+                    r["pair_details"] = json.loads(r["pair_details"])
+                results.append(r)
+            return results
+
+    # Perturbation Operations
+    def add_perturbation_result(self, result: dict[str, Any]) -> str:
+        """Store a perturbation analysis result."""
+        result_id = str(uuid4())
+        with self._get_connection() as conn:
+            conn.execute(
+                """INSERT INTO perturbation_results
+                   (id, run_id, query_id, provider, operator, original_query,
+                    perturbed_query, jaccard_similarity, rbo_score,
+                    original_results, perturbed_results)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    result_id,
+                    result.get("run_id"),
+                    result.get("query_id"),
+                    result["provider"],
+                    result["operator"],
+                    result.get("original_query"),
+                    result.get("perturbed_query"),
+                    result.get("jaccard_similarity"),
+                    result.get("rbo_score"),
+                    json.dumps(result.get("original_results", [])),
+                    json.dumps(result.get("perturbed_results", [])),
+                ),
+            )
+            conn.commit()
+        return result_id
+
+    def get_perturbation_results(
+        self, run_id: str, provider: str | None = None
+    ) -> list[dict[str, Any]]:
+        """Get perturbation results for a run."""
+        query = "SELECT * FROM perturbation_results WHERE run_id = ?"
+        params: list[Any] = [run_id]
+        if provider:
+            query += " AND provider = ?"
+            params.append(provider)
+        with self._get_connection() as conn:
+            rows = conn.execute(query, params).fetchall()
+            results = []
+            for row in rows:
+                r = dict(row)
+                if r.get("original_results"):
+                    r["original_results"] = json.loads(r["original_results"])
+                if r.get("perturbed_results"):
+                    r["perturbed_results"] = json.loads(r["perturbed_results"])
+                results.append(r)
+            return results
+
+    # Validation Operations
+    def add_validation_result(self, result: dict[str, Any]) -> str:
+        """Store a cross-encoder validation result."""
+        result_id = str(uuid4())
+        with self._get_connection() as conn:
+            conn.execute(
+                """INSERT INTO validation_results
+                   (id, run_id, query_id, provider, cross_encoder_model,
+                    original_ndcg, reranked_ndcg, ndcg_improvement, kendall_tau, scores)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    result_id,
+                    result.get("run_id"),
+                    result.get("query_id"),
+                    result["provider"],
+                    result.get("cross_encoder_model"),
+                    result.get("original_ndcg"),
+                    result.get("reranked_ndcg"),
+                    result.get("ndcg_improvement"),
+                    result.get("kendall_tau"),
+                    json.dumps(result.get("scores", [])),
+                ),
+            )
+            conn.commit()
+        return result_id
+
+    def get_validation_results(
+        self, run_id: str, provider: str | None = None
+    ) -> list[dict[str, Any]]:
+        """Get validation results for a run."""
+        query = "SELECT * FROM validation_results WHERE run_id = ?"
+        params: list[Any] = [run_id]
+        if provider:
+            query += " AND provider = ?"
+            params.append(provider)
+        with self._get_connection() as conn:
+            rows = conn.execute(query, params).fetchall()
+            results = []
+            for row in rows:
+                r = dict(row)
+                if r.get("scores"):
+                    r["scores"] = json.loads(r["scores"])
+                results.append(r)
             return results
 
     # Stats

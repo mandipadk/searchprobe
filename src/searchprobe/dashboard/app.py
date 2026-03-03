@@ -58,6 +58,9 @@ def run_dashboard() -> None:
             "📁 Category Deep Dive",
             "🔎 Query Explorer",
             "⚠️ Failure Analysis",
+            "🧬 Embedding Geometry",
+            "🔧 Robustness Analysis",
+            "✅ Cross-Encoder Validation",
         ],
     )
 
@@ -93,6 +96,15 @@ def run_dashboard() -> None:
         render(db, selected_run["id"])
     elif page == "⚠️ Failure Analysis":
         from searchprobe.dashboard.pages.failure_analysis import render
+        render(db, selected_run["id"])
+    elif page == "🧬 Embedding Geometry":
+        from searchprobe.dashboard.pages.embedding_geometry import render
+        render(db, selected_run["id"])
+    elif page == "🔧 Robustness Analysis":
+        from searchprobe.dashboard.pages.robustness import render
+        render(db, selected_run["id"])
+    elif page == "✅ Cross-Encoder Validation":
+        from searchprobe.dashboard.pages.validation import render
         render(db, selected_run["id"])
 
 
