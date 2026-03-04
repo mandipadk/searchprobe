@@ -71,6 +71,9 @@ analysis = [
     "umap-learn>=0.5",
     "nltk>=3.8",
 ]
+modal = [
+    "modal>=0.73",
+]
 dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.23",

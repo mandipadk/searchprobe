@@ -174,6 +174,49 @@ Cross-encoders jointly encode (query, document) pairs at O(n) cost, producing mu
 ### Perturbation Analysis
 Systematic query modification reveals which words are "load-bearing" for retrieval, producing sensitivity maps analogous to attention visualization in NLP.
 
+## Remote Compute
+
+SearchProbe's research modules (geometry, validation, perturbation, evolution) require heavy ML dependencies (PyTorch, sentence-transformers, scikit-learn). Two remote compute options are provided so you don't need to install these locally.
+
+### Google Colab
+
+Open `notebooks/searchprobe_analysis.ipynb` in [Google Colab](https://colab.research.google.com/) for an interactive GPU-powered research walkthrough. The notebook covers all analysis modules with inline visualizations.
+
+```
+notebooks/searchprobe_analysis.ipynb
+```
+
+Each section is self-contained — geometry analysis requires no API keys (just sentence-transformer models). Set API keys via Colab Secrets for sections that need live search.
+
+### Modal
+
+[Modal](https://modal.com) provides programmatic GPU access. The `modal_app.py` file exposes SearchProbe analysis as remote GPU functions.
+
+```bash
+# Install Modal
+pip install "searchprobe[modal]"
+modal token set
+
+# Run geometry analysis on GPU
+modal run modal_app.py --command geometry --models "all-MiniLM-L6-v2,all-mpnet-base-v2"
+
+# Analyze specific categories
+modal run modal_app.py --command geometry --categories "negation,antonym_confusion"
+
+# Save results
+modal run modal_app.py --command geometry --output geometry_results.json
+```
+
+Use from Python:
+
+```python
+from searchprobe.compute.modal_runner import ModalRunner
+
+runner = ModalRunner()
+report = runner.geometry(models=["all-MiniLM-L6-v2"])
+embeddings = runner.encode(texts=["companies in AI", "companies NOT in AI"])
+```
+
 ## Development
 
 ```bash
