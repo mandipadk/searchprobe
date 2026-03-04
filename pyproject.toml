@@ -38,7 +38,7 @@ dependencies = [
     "pydantic-settings>=2.1",
 
     # LLM Clients
-    "anthropic>=0.39",
+    "anthropic[vertex]>=0.39",
     "openai>=1.40",
 
     # Database

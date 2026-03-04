@@ -6,9 +6,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
-import anthropic
-
-from searchprobe.config import Settings, get_settings
+from searchprobe.config import Settings, get_anthropic_client, get_settings
 from searchprobe.evaluation.dimensions import (
     EvaluationDimension,
     get_active_dimensions,
@@ -74,7 +72,7 @@ class SearchJudge:
     def __init__(
         self,
         settings: Settings | None = None,
-        model: str = "claude-sonnet-4-20250514",
+        model: str = "claude-sonnet-4-6",
     ) -> None:
         """Initialize the judge.
 
@@ -85,13 +83,14 @@ class SearchJudge:
         self.settings = settings or get_settings()
         self.model = model
 
-        if not self.settings.anthropic_api_key:
+        if not self.settings.has_anthropic_configured():
             raise ValueError(
-                "Anthropic API key required for evaluation. "
-                "Set SEARCHPROBE_ANTHROPIC_API_KEY in .env"
+                "Anthropic credentials required for evaluation. "
+                "Set SEARCHPROBE_ANTHROPIC_API_KEY in .env, or enable Vertex AI with "
+                "SEARCHPROBE_USE_VERTEX_AI=true and SEARCHPROBE_VERTEX_PROJECT_ID"
             )
 
-        self.client = anthropic.Anthropic(api_key=self.settings.anthropic_api_key)
+        self.client = get_anthropic_client(self.settings)
 
     async def evaluate(
         self,

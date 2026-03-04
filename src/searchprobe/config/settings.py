@@ -29,6 +29,11 @@ class Settings(BaseSettings):
     anthropic_api_key: str | None = None
     openai_api_key: str | None = None
 
+    # Vertex AI Configuration (alternative to direct Anthropic API key)
+    use_vertex_ai: bool = False
+    vertex_project_id: str | None = None
+    vertex_region: str = "global"
+
     # Database
     database_path: str = "searchprobe.db"
 
@@ -41,9 +46,9 @@ class Settings(BaseSettings):
     budget_limit_usd: float = 10.0
 
     # LLM Settings
-    judge_model: str = "claude-sonnet-4-20250514"
+    judge_model: str = "claude-sonnet-4-6"
     judge_temperature: float = 0.0
-    generation_model: str = "claude-sonnet-4-20250514"
+    generation_model: str = "claude-sonnet-4-6"
     generation_temperature: float = 0.9
 
     @property
@@ -62,7 +67,18 @@ class Settings(BaseSettings):
 
     def has_llm_configured(self) -> bool:
         """Check if at least one LLM provider is configured."""
-        return bool(self.anthropic_api_key or self.openai_api_key)
+        return bool(
+            self.anthropic_api_key
+            or self.openai_api_key
+            or (self.use_vertex_ai and self.vertex_project_id)
+        )
+
+    def has_anthropic_configured(self) -> bool:
+        """Check if Anthropic is available via direct API key or Vertex AI."""
+        return bool(
+            self.anthropic_api_key
+            or (self.use_vertex_ai and self.vertex_project_id)
+        )
 
 
 @lru_cache

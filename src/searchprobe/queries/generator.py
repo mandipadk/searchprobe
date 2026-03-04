@@ -5,7 +5,7 @@ from typing import Any
 
 from pydantic import BaseModel
 
-from searchprobe.config import get_settings
+from searchprobe.config import get_anthropic_client, get_settings
 from searchprobe.queries.models import GroundTruth, Query, QuerySet
 from searchprobe.queries.seeds import get_builtin_seeds, load_all_seeds
 from searchprobe.queries.taxonomy import (
@@ -88,14 +88,9 @@ class QueryGenerator:
 
     @property
     def client(self):
-        """Lazy-load Anthropic client."""
+        """Lazy-load Anthropic client (direct API or Vertex AI)."""
         if self._client is None:
-            from anthropic import Anthropic
-
-            settings = get_settings()
-            if not settings.anthropic_api_key:
-                raise ValueError("ANTHROPIC_API_KEY not configured")
-            self._client = Anthropic(api_key=settings.anthropic_api_key)
+            self._client = get_anthropic_client()
         return self._client
 
     def generate_for_category(
@@ -329,8 +324,8 @@ def generate_query_set(
 
     # Tier 3: LLM generation
     if "llm" in tiers and use_llm:
-        if not settings.anthropic_api_key:
-            print("  Skipping LLM generation (no API key configured)")
+        if not settings.has_anthropic_configured():
+            print("  Skipping LLM generation (no Anthropic credentials configured)")
         else:
             print("Generating LLM-based queries...")
             generator = QueryGenerator()

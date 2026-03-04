@@ -58,10 +58,13 @@ def evaluate(
     """Evaluate search results using LLM-as-judge."""
     settings = get_settings()
 
-    # Check for API key
-    if not settings.anthropic_api_key:
-        console.print("[red]Error: Anthropic API key required for evaluation.[/red]")
-        console.print("Set SEARCHPROBE_ANTHROPIC_API_KEY in .env file")
+    # Check for Anthropic credentials (direct API key or Vertex AI)
+    if not settings.has_anthropic_configured():
+        console.print("[red]Error: Anthropic credentials required for evaluation.[/red]")
+        console.print(
+            "Set SEARCHPROBE_ANTHROPIC_API_KEY in .env, or enable Vertex AI with "
+            "SEARCHPROBE_USE_VERTEX_AI=true and SEARCHPROBE_VERTEX_PROJECT_ID"
+        )
         raise typer.Exit(1)
 
     db = Database(settings.database_path)

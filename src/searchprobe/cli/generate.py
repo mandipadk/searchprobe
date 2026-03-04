@@ -99,9 +99,12 @@ def generate(
 
     # Check LLM availability
     use_llm = "llm" in tier_list and not no_llm
-    if use_llm and not settings.anthropic_api_key:
-        console.print("[yellow]Warning: No Anthropic API key configured.[/yellow]")
-        console.print("LLM generation will be skipped. Set SEARCHPROBE_ANTHROPIC_API_KEY in .env")
+    if use_llm and not settings.has_anthropic_configured():
+        console.print("[yellow]Warning: No Anthropic credentials configured.[/yellow]")
+        console.print(
+            "LLM generation will be skipped. Set SEARCHPROBE_ANTHROPIC_API_KEY or "
+            "enable Vertex AI (SEARCHPROBE_USE_VERTEX_AI=true + SEARCHPROBE_VERTEX_PROJECT_ID)"
+        )
         use_llm = False
 
     # Show plan
