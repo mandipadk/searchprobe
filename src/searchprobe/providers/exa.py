@@ -57,9 +57,13 @@ class ExaProvider(SearchProvider):
                 "type": mode if mode != "deep" else "auto",  # Deep uses auto with extra params
             }
 
-            # Add content retrieval if requested
+            # Add content retrieval if requested (exa-py v2+ uses 'contents')
             if request.include_content:
-                search_kwargs["text"] = {"max_characters": request.max_content_chars}
+                from exa_py.api import ContentsOptions, TextContentsOptions
+
+                search_kwargs["contents"] = ContentsOptions(
+                    text=TextContentsOptions(max_characters=request.max_content_chars)
+                )
 
             # Execute search (Exa SDK is synchronous, run in executor for async)
             import asyncio

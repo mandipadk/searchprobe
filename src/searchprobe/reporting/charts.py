@@ -64,7 +64,7 @@ def create_radar_chart(
                 line=dict(color=color),
                 fillcolor=color.replace(")", ", 0.2)").replace("rgb", "rgba")
                 if "rgb" in color
-                else color + "33",
+                else f"rgba({int(color[1:3], 16)}, {int(color[3:5], 16)}, {int(color[5:7], 16)}, 0.2)",
             )
         )
 
@@ -509,7 +509,7 @@ def create_similarity_distribution(
                     box_visible=True,
                     meanline_visible=True,
                     line_color=color,
-                    fillcolor=color + "40",
+                    fillcolor=f"rgba({int(color[1:3], 16)}, {int(color[3:5], 16)}, {int(color[5:7], 16)}, 0.25)",
                     opacity=0.7,
                 )
             )
