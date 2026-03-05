@@ -81,7 +81,7 @@ def perturb(
     for r in search_results:
         if r["query_id"] not in seen_queries:
             seen_queries.add(r["query_id"])
-            queries.append({"text": r["query_text"], "category": r["category"]})
+            queries.append({"text": r["query_text"], "category": r["category"], "query_id": r["query_id"]})
 
     if not queries:
         console.print("[yellow]No queries found for perturbation.[/yellow]")
@@ -141,11 +141,14 @@ def perturb(
             engine.analyze_queries(queries, search_mode, on_progress)
         )
 
+    # Build lookup: original_query_text -> query_id
+    query_id_map: dict[str, str] = {q["text"]: q["query_id"] for q in queries}
+
     # Save results
     for analysis in report.analyses:
         db.add_perturbation_result({
             "run_id": actual_run_id,
-            "query_id": None,
+            "query_id": query_id_map.get(analysis.original_query),
             "provider": analysis.provider,
             "operator": analysis.perturbation_type,
             "original_query": analysis.original_query,

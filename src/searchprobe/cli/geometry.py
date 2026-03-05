@@ -31,6 +31,12 @@ def geometry(
         "-f",
         help="Output format: table, json",
     ),
+    run_id: str = typer.Option(
+        "latest",
+        "--run-id",
+        "-r",
+        help="Run ID to associate results with (or 'latest')",
+    ),
     save: bool = typer.Option(
         True,
         "--save/--no-save",
@@ -88,9 +94,18 @@ def geometry(
         settings = get_settings()
         db = Database(settings.database_path)
 
+        # Resolve run_id
+        actual_run_id = None
+        if run_id == "latest":
+            actual_run_id = db.get_latest_run_id()
+        else:
+            actual_run_id = run_id
+
         for model, cats in report.profiles.items():
             for cat, profile in cats.items():
-                db.add_geometry_result(profile.to_dict())
+                result = profile.to_dict()
+                result["run_id"] = actual_run_id
+                db.add_geometry_result(result)
 
         console.print(f"[green]Results saved to database[/green]")
 

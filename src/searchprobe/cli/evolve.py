@@ -146,6 +146,27 @@ def evolve(
 
         result = asyncio.run(optimizer.optimize(progress_callback=on_progress))
 
+    # Persist results to database
+    from searchprobe.storage import Database
+
+    settings = get_settings()
+    db = Database(settings.database_path)
+    db.add_evolution_result({
+        "fitness_mode": fitness_mode,
+        "provider": provider,
+        "generations_completed": result.generations_completed,
+        "total_evaluations": result.total_evaluations,
+        "total_cost": result.total_cost,
+        "best_individuals": [i.to_dict() for i in result.best_individuals],
+        "fitness_history": result.fitness_history,
+        "config": {
+            "population_size": population,
+            "generations": generations,
+            "budget_limit": budget,
+            "fitness_mode": fitness_mode,
+        },
+    })
+
     # Display results
     console.print(f"\n[green]Evolution complete![/green]")
     console.print(f"  Generations: {result.generations_completed}")

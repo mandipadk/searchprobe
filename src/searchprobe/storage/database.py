@@ -100,6 +100,7 @@ class Database:
     -- Geometry Analysis Results
     CREATE TABLE IF NOT EXISTS geometry_results (
         id TEXT PRIMARY KEY,
+        run_id TEXT REFERENCES runs(id),
         model_name TEXT NOT NULL,
         category TEXT NOT NULL,
         adversarial_similarity REAL,
@@ -143,6 +144,20 @@ class Database:
         timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
 
+    -- Evolution Results
+    CREATE TABLE IF NOT EXISTS evolution_results (
+        id TEXT PRIMARY KEY,
+        fitness_mode TEXT NOT NULL,
+        provider TEXT,
+        generations_completed INTEGER,
+        total_evaluations INTEGER,
+        total_cost REAL,
+        best_individuals TEXT,  -- JSON
+        fitness_history TEXT,   -- JSON
+        config TEXT,            -- JSON
+        timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+
     -- Indexes for common queries
     CREATE INDEX IF NOT EXISTS idx_queries_category ON queries(category);
     CREATE INDEX IF NOT EXISTS idx_queries_query_set ON queries(query_set_id);
@@ -153,6 +168,7 @@ class Database:
     CREATE INDEX IF NOT EXISTS idx_geometry_model_category ON geometry_results(model_name, category);
     CREATE INDEX IF NOT EXISTS idx_perturbation_run ON perturbation_results(run_id);
     CREATE INDEX IF NOT EXISTS idx_validation_run ON validation_results(run_id);
+    CREATE INDEX IF NOT EXISTS idx_evolution_timestamp ON evolution_results(timestamp);
     """
 
     def __init__(self, db_path: str | Path = "searchprobe.db") -> None:
@@ -165,6 +181,10 @@ class Database:
         with self._get_connection() as conn:
             conn.execute("PRAGMA journal_mode=WAL")
             conn.executescript(self.SCHEMA)
+            # Migrate: add run_id to geometry_results if missing
+            cols = [row[1] for row in conn.execute("PRAGMA table_info(geometry_results)").fetchall()]
+            if "run_id" not in cols:
+                conn.execute("ALTER TABLE geometry_results ADD COLUMN run_id TEXT REFERENCES runs(id)")
             conn.commit()
 
     @contextmanager
@@ -498,12 +518,13 @@ class Database:
         with self._get_connection() as conn:
             conn.execute(
                 """INSERT INTO geometry_results
-                   (id, model_name, category, adversarial_similarity,
+                   (id, run_id, model_name, category, adversarial_similarity,
                     baseline_similarity, collapse_ratio, vulnerability_score,
                     intrinsic_dimensionality, isotropy_score, pair_details)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     result_id,
+                    result.get("run_id"),
                     result["model_name"],
                     result["category"],
                     result.get("adversarial_similarity"),
@@ -519,11 +540,17 @@ class Database:
         return result_id
 
     def get_geometry_results(
-        self, model_name: str | None = None, category: str | None = None
+        self,
+        model_name: str | None = None,
+        category: str | None = None,
+        run_id: str | None = None,
     ) -> list[dict[str, Any]]:
         """Get geometry analysis results."""
         query = "SELECT * FROM geometry_results WHERE 1=1"
         params: list[Any] = []
+        if run_id:
+            query += " AND run_id = ?"
+            params.append(run_id)
         if model_name:
             query += " AND model_name = ?"
             params.append(model_name)
@@ -632,6 +659,98 @@ class Database:
                 r = dict(row)
                 if r.get("scores"):
                     r["scores"] = json.loads(r["scores"])
+                results.append(r)
+            return results
+
+    # Evolution Operations
+    def add_evolution_result(self, result: dict[str, Any]) -> str:
+        """Store an evolution optimization result."""
+        result_id = str(uuid4())
+        with self._get_connection() as conn:
+            conn.execute(
+                """INSERT INTO evolution_results
+                   (id, fitness_mode, provider, generations_completed,
+                    total_evaluations, total_cost, best_individuals,
+                    fitness_history, config)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    result_id,
+                    result["fitness_mode"],
+                    result.get("provider"),
+                    result.get("generations_completed"),
+                    result.get("total_evaluations"),
+                    result.get("total_cost"),
+                    json.dumps(result.get("best_individuals", [])),
+                    json.dumps(result.get("fitness_history", [])),
+                    json.dumps(result.get("config", {})),
+                ),
+            )
+            conn.commit()
+        return result_id
+
+    def get_evolution_results(self) -> list[dict[str, Any]]:
+        """Get all evolution results, most recent first."""
+        with self._get_connection() as conn:
+            rows = conn.execute(
+                "SELECT * FROM evolution_results ORDER BY timestamp DESC"
+            ).fetchall()
+            results = []
+            for row in rows:
+                r = dict(row)
+                for field in ("best_individuals", "fitness_history", "config"):
+                    if r.get(field):
+                        r[field] = json.loads(r[field])
+                results.append(r)
+            return results
+
+    # Join queries for category info
+    def get_validation_results_with_category(
+        self, run_id: str, provider: str | None = None
+    ) -> list[dict[str, Any]]:
+        """Get validation results joined with query category info."""
+        query = """
+            SELECT v.*, q.text as query_text, q.category
+            FROM validation_results v
+            JOIN queries q ON v.query_id = q.id
+            WHERE v.run_id = ?
+        """
+        params: list[Any] = [run_id]
+        if provider:
+            query += " AND v.provider = ?"
+            params.append(provider)
+        with self._get_connection() as conn:
+            rows = conn.execute(query, params).fetchall()
+            results = []
+            for row in rows:
+                r = dict(row)
+                if r.get("scores"):
+                    r["scores"] = json.loads(r["scores"])
+                results.append(r)
+            return results
+
+    def get_perturbation_results_with_category(
+        self, run_id: str, provider: str | None = None
+    ) -> list[dict[str, Any]]:
+        """Get perturbation results joined with query category info."""
+        query = """
+            SELECT p.*, q.text as query_text, q.category
+            FROM perturbation_results p
+            LEFT JOIN queries q ON p.query_id = q.id
+            WHERE p.run_id = ?
+        """
+        params: list[Any] = [run_id]
+        if provider:
+            query += " AND p.provider = ?"
+            params.append(provider)
+        with self._get_connection() as conn:
+            rows = conn.execute(query, params).fetchall()
+            results = []
+            for row in rows:
+                r = dict(row)
+                if r.get("original_results"):
+                    r["original_results"] = json.loads(r["original_results"])
+                if r.get("perturbed_results"):
+                    r["perturbed_results"] = json.loads(r["perturbed_results"])
                 results.append(r)
             return results
 
