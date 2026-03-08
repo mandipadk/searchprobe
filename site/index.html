@@ -1,0 +1,452 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SearchProbe - Adversarial Benchmarking for Neural Search</title>
+  <meta name="description" content="An adversarial benchmarking framework that stress-tests neural search engines to find where they fail and why." />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='20' fill='%23111'/></svg>" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+  <!-- Nav -->
+  <nav class="nav" id="nav">
+    <div class="nav-inner">
+      <a href="#" class="nav-logo">SearchProbe</a>
+      <div class="nav-links">
+        <a href="#problem">Problem</a>
+        <a href="#approach">Approach</a>
+        <a href="#results">Results</a>
+        <a href="#architecture">Architecture</a>
+        <a href="https://github.com/mandipadk/searchprobe" class="nav-cta" target="_blank" rel="noopener">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
+          GitHub
+        </a>
+      </div>
+      <button class="nav-toggle" id="navToggle" aria-label="Toggle menu">
+        <span></span><span></span><span></span>
+      </button>
+    </div>
+  </nav>
+
+  <!-- Hero -->
+  <header class="hero">
+    <div class="container hero-content">
+      <p class="hero-label">Adversarial AI Research</p>
+      <h1>Where does neural search break?</h1>
+      <p class="hero-sub">
+        SearchProbe stress-tests neural search engines with embedding-theory-grounded
+        attacks, revealing failure modes like negation blindness, numeric imprecision,
+        and compositional reasoning collapse.
+      </p>
+      <div class="hero-stats">
+        <div class="hero-stat">
+          <span class="hero-stat-num" data-target="138">0</span>
+          <span class="hero-stat-label">Adversarial Queries</span>
+        </div>
+        <div class="hero-stat-divider"></div>
+        <div class="hero-stat">
+          <span class="hero-stat-num" data-target="13">0</span>
+          <span class="hero-stat-label">Attack Categories</span>
+        </div>
+        <div class="hero-stat-divider"></div>
+        <div class="hero-stat">
+          <span class="hero-stat-num" data-target="965">0</span>
+          <span class="hero-stat-label">Evaluations</span>
+        </div>
+        <div class="hero-stat-divider"></div>
+        <div class="hero-stat">
+          <span class="hero-stat-num" data-target="5">0</span>
+          <span class="hero-stat-label">Provider Modes</span>
+        </div>
+      </div>
+      <div class="hero-actions">
+        <a href="#results" class="btn btn-dark">See Results</a>
+        <a href="#approach" class="btn btn-outline">How It Works</a>
+      </div>
+    </div>
+  </header>
+
+  <!-- Problem -->
+  <section class="section" id="problem">
+    <div class="container">
+      <p class="section-label">The Problem</p>
+      <h2>Neural search engines can't tell opposites apart</h2>
+      <p class="section-sub">
+        Modern search APIs powered by embedding models map queries to dense vector spaces.
+        But semantically opposite queries often land in nearly the same region of that space.
+      </p>
+
+      <div class="problem-grid">
+        <div class="problem-card">
+          <div class="problem-card-header">
+            <svg class="problem-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+            <h3>Negation Blindness</h3>
+          </div>
+          <div class="problem-pair">
+            <div class="query-box">"Companies in the AI industry"</div>
+            <div class="sim-badge">0.877 cosine similarity</div>
+            <div class="query-box query-adversarial">"Companies NOT in the AI industry"</div>
+          </div>
+          <p>Adding "NOT" barely moves the embedding. The search engine returns nearly identical results for opposite queries.</p>
+        </div>
+
+        <div class="problem-card">
+          <div class="problem-card-header">
+            <svg class="problem-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" y1="22" x2="4" y2="15"/></svg>
+            <h3>Numeric Imprecision</h3>
+          </div>
+          <div class="problem-pair">
+            <div class="query-box">"Companies with exactly 50 employees"</div>
+            <div class="sim-badge">0.20 relevance score</div>
+            <div class="query-box query-adversarial">Results: ranges like "11-50" or "51-200"</div>
+          </div>
+          <p>Embedding models treat numbers as tokens, not quantities. "Exactly 50" gets matched to anything near 50.</p>
+        </div>
+
+        <div class="problem-card">
+          <div class="problem-card-header">
+            <svg class="problem-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg>
+            <h3>Compositional Collapse</h3>
+          </div>
+          <div class="problem-pair">
+            <div class="query-box">"Companies acquired by their former subsidiaries"</div>
+            <div class="sim-badge">0.951 cosine similarity</div>
+            <div class="query-box query-adversarial">"Subsidiaries acquired by their parent companies"</div>
+          </div>
+          <p>Reversing the relationship barely changes the embedding. The model sees the same bag of concepts.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Approach -->
+  <section class="section section-alt" id="approach">
+    <div class="container">
+      <p class="section-label">The Approach</p>
+      <h2>A six-stage adversarial research pipeline</h2>
+      <p class="section-sub">
+        SearchProbe combines multiple analysis techniques to explain <em>why</em> search fails
+        at each stage, from embedding geometry to result-level evaluation.
+      </p>
+
+      <div class="pipeline">
+        <div class="pipeline-step">
+          <div class="step-number">01</div>
+          <div class="step-content">
+            <h3>Query Generation</h3>
+            <p>138 adversarial queries across 13 categories, using hand-curated seeds, parameterized templates, and LLM-generated variants.</p>
+            <span class="step-tag">Anthropic Claude</span>
+          </div>
+        </div>
+        <div class="pipeline-step">
+          <div class="step-number">02</div>
+          <div class="step-content">
+            <h3>Multi-Provider Benchmark</h3>
+            <p>Each query is sent to 4 providers (Exa, Tavily, Brave, SerpAPI) across 5 search modes, producing 689 successful result sets.</p>
+            <span class="step-tag">Async I/O</span>
+          </div>
+        </div>
+        <div class="pipeline-step">
+          <div class="step-number">03</div>
+          <div class="step-content">
+            <h3>LLM-as-Judge Evaluation</h3>
+            <p>965 result sets evaluated with structured scoring, failure mode extraction, bootstrap confidence intervals, and Benjamini-Hochberg correction.</p>
+            <span class="step-tag">Statistical Rigor</span>
+          </div>
+        </div>
+        <div class="pipeline-step">
+          <div class="step-number">04</div>
+          <div class="step-content">
+            <h3>Embedding Geometry Analysis</h3>
+            <p>26 vulnerability profiles computed across 2 sentence-transformer models, measuring cosine collapse ratios and intrinsic dimensionality.</p>
+            <span class="step-tag">PyTorch</span>
+          </div>
+        </div>
+        <div class="pipeline-step">
+          <div class="step-number">05</div>
+          <div class="step-content">
+            <h3>Cross-Encoder Validation</h3>
+            <p>Every result re-ranked by a cross-encoder to measure the "embedding gap" &mdash; how much a smarter model disagrees with the original ranking.</p>
+            <span class="step-tag">NDCG / Kendall's tau</span>
+          </div>
+        </div>
+        <div class="pipeline-step">
+          <div class="step-number">06</div>
+          <div class="step-content">
+            <h3>Perturbation &amp; Evolution</h3>
+            <p>144 perturbation analyses measuring result stability, plus evolutionary optimization that improved adversarial fitness from 0.23 to 0.95 over 20 generations.</p>
+            <span class="step-tag">Genetic Algorithm</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Results -->
+  <section class="section" id="results">
+    <div class="container">
+      <p class="section-label">Results</p>
+      <h2>What we found</h2>
+      <p class="section-sub">
+        Benchmarking 4 search providers across 13 adversarial categories reveals systematic
+        failure patterns rooted in embedding geometry &mdash; not just implementation quirks.
+      </p>
+
+      <!-- Provider Comparison -->
+      <div class="results-block">
+        <h3>Provider Performance</h3>
+        <p class="results-desc">Mean relevance score (0&ndash;1) across 138 adversarial queries, evaluated by LLM-as-judge with 95% bootstrap confidence intervals.</p>
+        <div class="provider-bars">
+          <div class="provider-bar-row">
+            <div class="provider-name">Exa <span class="provider-mode">neural</span></div>
+            <div class="bar-track">
+              <div class="bar-fill" style="--bar-width: 55.7%;" data-value="0.557"></div>
+            </div>
+            <div class="bar-value">0.557</div>
+            <div class="bar-ci">[0.503, 0.610]</div>
+          </div>
+          <div class="provider-bar-row">
+            <div class="provider-name">Exa <span class="provider-mode">auto</span></div>
+            <div class="bar-track">
+              <div class="bar-fill" style="--bar-width: 55.2%;" data-value="0.552"></div>
+            </div>
+            <div class="bar-value">0.552</div>
+            <div class="bar-ci">[0.502, 0.603]</div>
+          </div>
+          <div class="provider-bar-row">
+            <div class="provider-name">Tavily <span class="provider-mode">advanced</span></div>
+            <div class="bar-track">
+              <div class="bar-fill" style="--bar-width: 50.1%;" data-value="0.501"></div>
+            </div>
+            <div class="bar-value">0.501</div>
+            <div class="bar-ci">[0.450, 0.552]</div>
+          </div>
+          <div class="provider-bar-row">
+            <div class="provider-name">SerpAPI <span class="provider-mode">google</span></div>
+            <div class="bar-track">
+              <div class="bar-fill" style="--bar-width: 48.9%;" data-value="0.489"></div>
+            </div>
+            <div class="bar-value">0.489</div>
+            <div class="bar-ci">[0.436, 0.542]</div>
+          </div>
+          <div class="provider-bar-row">
+            <div class="provider-name">Brave <span class="provider-mode">web</span></div>
+            <div class="bar-track">
+              <div class="bar-fill" style="--bar-width: 48.2%;" data-value="0.482"></div>
+            </div>
+            <div class="bar-value">0.482</div>
+            <div class="bar-ci">[0.428, 0.536]</div>
+          </div>
+        </div>
+        <p class="results-note">No statistically significant difference between Tavily, SerpAPI, and Brave (p &gt; 0.4). All providers struggle on the same categories.</p>
+      </div>
+
+      <!-- Category Scores -->
+      <div class="results-block">
+        <h3>Category Vulnerability</h3>
+        <p class="results-desc">Mean relevance score by adversarial category, sorted worst to best. Lower = more vulnerable.</p>
+        <div class="category-bars">
+          <div class="cat-row"><span class="cat-label">Numeric Precision</span><div class="cat-track"><div class="cat-fill" style="--cat-width: 20.2%;"></div></div><span class="cat-value">0.20</span></div>
+          <div class="cat-row"><span class="cat-label">Compositional</span><div class="cat-track"><div class="cat-fill" style="--cat-width: 23.2%;"></div></div><span class="cat-value">0.23</span></div>
+          <div class="cat-row"><span class="cat-label">Multi-Constraint</span><div class="cat-track"><div class="cat-fill" style="--cat-width: 34.7%;"></div></div><span class="cat-value">0.35</span></div>
+          <div class="cat-row"><span class="cat-label">Specificity</span><div class="cat-track"><div class="cat-fill" style="--cat-width: 42.1%;"></div></div><span class="cat-value">0.42</span></div>
+          <div class="cat-row"><span class="cat-label">Counterfactual</span><div class="cat-track"><div class="cat-fill" style="--cat-width: 47.1%;"></div></div><span class="cat-value">0.47</span></div>
+          <div class="cat-row"><span class="cat-label">Negation</span><div class="cat-track"><div class="cat-fill" style="--cat-width: 47.5%;"></div></div><span class="cat-value">0.48</span></div>
+          <div class="cat-row"><span class="cat-label">Boolean Logic</span><div class="cat-track"><div class="cat-fill" style="--cat-width: 50.3%;"></div></div><span class="cat-value">0.50</span></div>
+          <div class="cat-row"><span class="cat-label">Temporal</span><div class="cat-track"><div class="cat-fill" style="--cat-width: 52.9%;"></div></div><span class="cat-value">0.53</span></div>
+          <div class="cat-row"><span class="cat-label">Cross-Lingual</span><div class="cat-track"><div class="cat-fill" style="--cat-width: 58.4%;"></div></div><span class="cat-value">0.58</span></div>
+          <div class="cat-row"><span class="cat-label">Instruction Following</span><div class="cat-track"><div class="cat-fill" style="--cat-width: 59.5%;"></div></div><span class="cat-value">0.60</span></div>
+          <div class="cat-row"><span class="cat-label">Antonym Confusion</span><div class="cat-track"><div class="cat-fill" style="--cat-width: 67.6%;"></div></div><span class="cat-value">0.68</span></div>
+          <div class="cat-row"><span class="cat-label">Entity Disambiguation</span><div class="cat-track"><div class="cat-fill" style="--cat-width: 81.9%;"></div></div><span class="cat-value">0.82</span></div>
+          <div class="cat-row"><span class="cat-label">Polysemy</span><div class="cat-track"><div class="cat-fill" style="--cat-width: 91.5%;"></div></div><span class="cat-value">0.92</span></div>
+        </div>
+      </div>
+
+      <!-- Key Findings -->
+      <div class="findings-grid">
+        <div class="finding-card">
+          <div class="finding-num">0.877</div>
+          <div class="finding-label">Negation Cosine Similarity</div>
+          <p>Adversarial pairs like "in AI" vs "NOT in AI" have 0.877 cosine similarity &mdash; a collapse ratio of 1.27x over baseline.</p>
+        </div>
+        <div class="finding-card">
+          <div class="finding-num">+142%</div>
+          <div class="finding-label">Cross-Encoder NDCG Lift</div>
+          <p>For negation queries, cross-encoder reranking improves NDCG by 142%, proving the bi-encoder embedding is the bottleneck.</p>
+        </div>
+        <div class="finding-card">
+          <div class="finding-num">71%</div>
+          <div class="finding-label">Result Set Instability</div>
+          <p>Inserting a single negation token changes 71% of the result set on average. Search results are fragile to small perturbations.</p>
+        </div>
+        <div class="finding-card">
+          <div class="finding-num">0.23 &rarr; 0.95</div>
+          <div class="finding-label">Evolved Fitness</div>
+          <p>Evolutionary optimization improved adversarial fitness from 0.23 to 0.95 over 20 generations via mutation operators.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Geometry Deep Dive -->
+  <section class="section section-alt" id="geometry">
+    <div class="container">
+      <p class="section-label">Deep Dive</p>
+      <h2>The embedding vulnerability map</h2>
+      <p class="section-sub">
+        Vulnerability profiles across 2 sentence-transformer models and 13 categories.
+        Higher scores mean the embedding space cannot distinguish adversarial pairs from originals.
+      </p>
+
+      <div class="geometry-table-wrap">
+        <table class="geometry-table">
+          <thead>
+            <tr>
+              <th>Category</th>
+              <th>Adversarial Sim.</th>
+              <th>Baseline Sim.</th>
+              <th>Collapse Ratio</th>
+              <th>Vulnerability</th>
+              <th>Intrinsic Dim.</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr class="vuln-critical">
+              <td>Compositional</td><td>0.951</td><td>0.647</td><td>1.47x</td><td class="vuln-score">0.796</td><td>2.2</td>
+            </tr>
+            <tr class="vuln-high">
+              <td>Antonym Confusion</td><td>0.866</td><td>0.738</td><td>1.17x</td><td class="vuln-score">0.551</td><td>3.2</td>
+            </tr>
+            <tr class="vuln-high">
+              <td>Numeric Precision</td><td>0.861</td><td>0.712</td><td>1.21x</td><td class="vuln-score">0.548</td><td>2.5</td>
+            </tr>
+            <tr class="vuln-high">
+              <td>Negation</td><td>0.877</td><td>0.692</td><td>1.27x</td><td class="vuln-score">0.513</td><td>2.9</td>
+            </tr>
+            <tr class="vuln-moderate">
+              <td>Temporal Constraint</td><td>0.822</td><td>0.661</td><td>1.24x</td><td class="vuln-score">0.424</td><td>2.8</td>
+            </tr>
+            <tr class="vuln-moderate">
+              <td>Instruction Following</td><td>0.757</td><td>0.647</td><td>1.17x</td><td class="vuln-score">0.391</td><td>4.3</td>
+            </tr>
+            <tr class="vuln-moderate">
+              <td>Boolean Logic</td><td>0.607</td><td>0.647</td><td>0.94x</td><td class="vuln-score">0.311</td><td>5.6</td>
+            </tr>
+            <tr>
+              <td>Multi-Constraint</td><td>0.604</td><td>0.647</td><td>0.93x</td><td class="vuln-score">0.309</td><td>5.6</td>
+            </tr>
+            <tr>
+              <td>Entity Disambiguation</td><td>0.477</td><td>0.647</td><td>0.74x</td><td class="vuln-score">0.241</td><td>5.9</td>
+            </tr>
+            <tr>
+              <td>Polysemy</td><td>0.391</td><td>0.774</td><td>0.51x</td><td class="vuln-score">0.178</td><td>7.9</td>
+            </tr>
+            <tr>
+              <td>Cross-Lingual</td><td>0.325</td><td>0.647</td><td>0.50x</td><td class="vuln-score">0.160</td><td>7.4</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="results-note">Data from all-MiniLM-L6-v2. Categories with low intrinsic dimensionality and high collapse ratios are most vulnerable.</p>
+    </div>
+  </section>
+
+  <!-- Architecture -->
+  <section class="section" id="architecture">
+    <div class="container">
+      <p class="section-label">Architecture</p>
+      <h2>Built for reproducibility</h2>
+      <p class="section-sub">
+        92 Python modules organized into 13 sub-packages, with async patterns throughout,
+        SQLite-backed persistence, and full type safety via Pydantic.
+      </p>
+
+      <div class="arch-grid">
+        <div class="arch-card">
+          <svg class="arch-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+          <h3>Async Pipeline</h3>
+          <p>All search providers run concurrently with asyncio and rate limiting. 689 API calls completed in under 4 minutes.</p>
+        </div>
+        <div class="arch-card">
+          <svg class="arch-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
+          <h3>13 Sub-Packages</h3>
+          <p>Modular design: providers, evaluation, geometry, perturbation, validation, evolution, reporting, dashboard, and more.</p>
+        </div>
+        <div class="arch-card">
+          <svg class="arch-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg>
+          <h3>SQLite Persistence</h3>
+          <p>Every query, result, evaluation, geometry profile, and perturbation is stored in a single database for full reproducibility.</p>
+        </div>
+        <div class="arch-card">
+          <svg class="arch-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 20V10M18 20V4M6 20v-4"/></svg>
+          <h3>LLM-as-Judge</h3>
+          <p>Structured evaluation with per-query scoring rubrics, failure mode extraction, and statistical significance testing.</p>
+        </div>
+        <div class="arch-card">
+          <svg class="arch-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/><path d="M9 1v3M15 1v3M9 20v3M15 20v3M20 9h3M20 14h3M1 9h3M1 14h3"/></svg>
+          <h3>GPU Compute</h3>
+          <p>Supports remote execution on Google Colab and Modal for GPU-accelerated embedding analysis on larger corpora.</p>
+        </div>
+        <div class="arch-card">
+          <svg class="arch-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+          <h3>Rich Reporting</h3>
+          <p>Interactive HTML reports with Plotly charts, markdown summaries, and an 8-page Streamlit dashboard for exploration.</p>
+        </div>
+      </div>
+
+      <div class="tech-stack">
+        <span class="tech-tag">Python 3.11+</span>
+        <span class="tech-tag">PyTorch</span>
+        <span class="tech-tag">scikit-learn</span>
+        <span class="tech-tag">sentence-transformers</span>
+        <span class="tech-tag">Pydantic</span>
+        <span class="tech-tag">Typer CLI</span>
+        <span class="tech-tag">asyncio / aiohttp</span>
+        <span class="tech-tag">SQLite / aiosqlite</span>
+        <span class="tech-tag">Plotly</span>
+        <span class="tech-tag">Streamlit</span>
+        <span class="tech-tag">NLTK</span>
+        <span class="tech-tag">UMAP</span>
+        <span class="tech-tag">Anthropic API</span>
+        <span class="tech-tag">Exa API</span>
+        <span class="tech-tag">Tavily API</span>
+        <span class="tech-tag">Brave Search</span>
+        <span class="tech-tag">SerpAPI</span>
+        <span class="tech-tag">Google Colab</span>
+        <span class="tech-tag">Modal</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- CTA -->
+  <section class="section section-cta">
+    <div class="container">
+      <h2>Explore the code</h2>
+      <p class="section-sub">
+        SearchProbe is open-source. Clone the repo, plug in your API keys, and run the full pipeline.
+      </p>
+      <div class="cta-code">
+        <code>pip install -e ".[analysis]" && searchprobe generate --count 5 --tiers seed,template,llm</code>
+      </div>
+      <a href="https://github.com/mandipadk/searchprobe" class="btn btn-dark btn-lg" target="_blank" rel="noopener">View on GitHub</a>
+    </div>
+  </section>
+
+  <!-- Footer -->
+  <footer class="footer">
+    <div class="container footer-inner">
+      <div class="footer-left">SearchProbe</div>
+      <div class="footer-right">
+        Built by <a href="https://github.com/mandipadk" target="_blank" rel="noopener">Mandip Adhikari</a>
+      </div>
+    </div>
+  </footer>
+
+  <script src="script.js"></script>
+</body>
+</html>
