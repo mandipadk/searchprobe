@@ -116,6 +116,22 @@ class BraveProvider(SearchProvider):
                 },
             )
 
+        except httpx.HTTPStatusError as e:
+            from searchprobe.core.exceptions import ProviderError, RateLimitError
+
+            latency_ms = (time.perf_counter() - start_time) * 1000
+            if e.response.status_code == 429:
+                raise RateLimitError(str(e), provider=self.NAME)
+            return SearchResponse(
+                provider=self.NAME,
+                search_mode=mode,
+                query=request.query,
+                results=[],
+                latency_ms=latency_ms,
+                cost_usd=0.0,
+                timestamp=datetime.utcnow(),
+                error=str(e),
+            )
         except Exception as e:
             latency_ms = (time.perf_counter() - start_time) * 1000
             return SearchResponse(

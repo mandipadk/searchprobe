@@ -7,6 +7,7 @@ from datetime import datetime
 from typing import Any
 
 from searchprobe.config import Settings, get_anthropic_client, get_settings
+from searchprobe.core.exceptions import ConfigurationError, EvaluationError
 from searchprobe.evaluation.dimensions import (
     EvaluationDimension,
     get_active_dimensions,
@@ -84,7 +85,7 @@ class SearchJudge:
         self.model = model
 
         if not self.settings.has_anthropic_configured():
-            raise ValueError(
+            raise ConfigurationError(
                 "Anthropic credentials required for evaluation. "
                 "Set SEARCHPROBE_ANTHROPIC_API_KEY in .env, or enable Vertex AI with "
                 "SEARCHPROBE_USE_VERTEX_AI=true and SEARCHPROBE_VERTEX_PROJECT_ID"
@@ -199,6 +200,10 @@ class SearchJudge:
             )
 
         except Exception as e:
+            error = EvaluationError(
+                f"Evaluation failed for query {query_id}: {e}"
+            )
+            error.__cause__ = e
             return EvaluationResult(
                 query_id=query_id,
                 provider=search_response.provider,
@@ -209,7 +214,7 @@ class SearchJudge:
                 failure_modes=["evaluation_failed"],
                 best_result_index=None,
                 overall_assessment="",
-                error=str(e),
+                error=str(error),
             )
 
     def _parse_response(self, response_text: str) -> dict:

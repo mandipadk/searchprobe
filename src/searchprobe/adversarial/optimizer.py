@@ -4,6 +4,7 @@ import random
 from datetime import datetime
 from typing import Any, Callable
 
+from searchprobe.adversarial.bandit import OperatorBandit
 from searchprobe.adversarial.crossover import apply_random_crossover
 from searchprobe.adversarial.fitness import FitnessEvaluator
 from searchprobe.adversarial.models import (
@@ -12,7 +13,7 @@ from searchprobe.adversarial.models import (
     OptimizationResult,
     Population,
 )
-from searchprobe.adversarial.mutations import apply_random_mutation
+from searchprobe.adversarial.mutations import MUTATION_OPERATORS, apply_random_mutation
 
 
 class AdversarialQueryOptimizer:
@@ -21,11 +22,16 @@ class AdversarialQueryOptimizer:
     Instead of hand-crafting adversarial queries, this uses evolutionary
     optimization to discover failure modes humans wouldn't think of.
 
+    Features:
+    - UCB1 bandit for adaptive mutation operator selection
+    - Optional geometry-guided mutation (via SharedContext)
+    - Diversity-aware survivor selection
+
     Algorithm:
     1. Initialize population from seed queries
     2. Evaluate fitness (how badly each query breaks the search engine)
     3. Select parents via tournament selection
-    4. Apply crossover and mutation to create offspring
+    4. Apply crossover and mutation to create offspring (using bandit-selected operators)
     5. Evaluate offspring fitness
     6. Select survivors (with elitism)
     7. Repeat for N generations
@@ -35,15 +41,19 @@ class AdversarialQueryOptimizer:
         self,
         config: EvolutionConfig,
         fitness_evaluator: FitnessEvaluator,
+        context: Any | None = None,
     ) -> None:
         """Initialize the optimizer.
 
         Args:
             config: Evolution configuration
             fitness_evaluator: Fitness evaluator for scoring individuals
+            context: Optional SharedContext for geometry-guided evolution
         """
         self.config = config
         self.fitness = fitness_evaluator
+        self.context = context
+        self.bandit = OperatorBandit(list(MUTATION_OPERATORS.keys()))
 
     def _initialize_population(self) -> Population:
         """Create initial population from seed queries."""
@@ -102,6 +112,8 @@ class AdversarialQueryOptimizer:
     def _create_offspring(self, population: Population) -> list[Individual]:
         """Create offspring through crossover and mutation.
 
+        Uses UCB1 bandit for adaptive operator selection instead of uniform random.
+
         Args:
             population: Current population
 
@@ -128,14 +140,29 @@ class AdversarialQueryOptimizer:
                     mutation_history=parent.mutation_history.copy(),
                 )
 
-            # Apply mutation with probability
+            # Apply mutation with bandit-selected operator
             if random.random() < self.config.mutation_rate:
-                child = apply_random_mutation(child)
+                operator_name = self.bandit.select()
+                operator_fn = MUTATION_OPERATORS[operator_name]
+                old_fitness = child.fitness
+                child = operator_fn(child)
+                # Store operator name for later reward update
+                child.metadata["_pending_operator"] = operator_name
+                child.metadata["_pre_mutation_fitness"] = old_fitness
 
             child.generation = population.generation + 1
             offspring.append(child)
 
         return offspring
+
+    def _update_bandit_rewards(self, offspring: list[Individual]) -> None:
+        """Update bandit with fitness improvements from mutations."""
+        for ind in offspring:
+            operator = ind.metadata.pop("_pending_operator", None)
+            pre_fitness = ind.metadata.pop("_pre_mutation_fitness", None)
+            if operator and pre_fitness is not None:
+                reward = ind.fitness - pre_fitness
+                self.bandit.update(operator, reward)
 
     async def optimize(
         self,
@@ -185,6 +212,9 @@ class AdversarialQueryOptimizer:
             # Evaluate offspring
             offspring = await self.fitness.evaluate_population(offspring)
             total_evaluations += len(offspring)
+
+            # Update bandit rewards based on fitness improvements
+            self._update_bandit_rewards(offspring)
 
             # Form next generation
             next_gen = elites + offspring

@@ -40,3 +40,28 @@ def sample_queries():
             "category": "temporal_constraint",
         },
     ]
+
+
+@pytest.fixture
+def sample_search_results():
+    """Sample search results for ground truth testing."""
+    return [
+        {
+            "title": "Top Python Libraries for Data Science",
+            "url": "https://example.com/python-libs",
+            "snippet": "Python is the most popular language for data science with 1500 stars on GitHub.",
+            "content": "Python libraries like pandas, numpy, and scikit-learn are essential for data science. Founded in 2020.",
+        },
+        {
+            "title": "Java vs Python for Machine Learning",
+            "url": "https://blog.example.com/java-python",
+            "snippet": "Comparing Java and Python for ML workloads. Java has 200 employees.",
+            "content": "While Java is faster, Python's ecosystem is more mature for ML tasks.",
+        },
+        {
+            "title": "Best Rust Frameworks in 2024",
+            "url": "https://rust.example.com/frameworks",
+            "snippet": "Rust frameworks gaining popularity with exactly 50 contributors.",
+            "content": "Actix-web and Rocket are leading Rust web frameworks.",
+        },
+    ]

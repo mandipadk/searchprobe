@@ -141,7 +141,15 @@ class ExaProvider(SearchProvider):
             )
 
         except Exception as e:
+            from searchprobe.core.exceptions import ProviderError, RateLimitError
+
             latency_ms = (time.perf_counter() - start_time) * 1000
+            error_msg = str(e)
+
+            # Detect rate limiting from error message
+            if "rate" in error_msg.lower() or "429" in error_msg:
+                raise RateLimitError(error_msg, provider=self.NAME)
+
             return SearchResponse(
                 provider=self.NAME,
                 search_mode=mode,
@@ -150,5 +158,5 @@ class ExaProvider(SearchProvider):
                 latency_ms=latency_ms,
                 cost_usd=0.0,
                 timestamp=datetime.utcnow(),
-                error=str(e),
+                error=error_msg,
             )

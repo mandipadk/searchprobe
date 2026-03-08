@@ -117,7 +117,14 @@ class TavilyProvider(SearchProvider):
             )
 
         except Exception as e:
+            from searchprobe.core.exceptions import RateLimitError
+
             latency_ms = (time.perf_counter() - start_time) * 1000
+            error_msg = str(e)
+
+            if "rate" in error_msg.lower() or "429" in error_msg:
+                raise RateLimitError(error_msg, provider=self.NAME)
+
             return SearchResponse(
                 provider=self.NAME,
                 search_mode=mode,
@@ -126,5 +133,5 @@ class TavilyProvider(SearchProvider):
                 latency_ms=latency_ms,
                 cost_usd=0.0,
                 timestamp=datetime.utcnow(),
-                error=str(e),
+                error=error_msg,
             )

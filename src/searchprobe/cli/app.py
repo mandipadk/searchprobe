@@ -49,6 +49,7 @@ from searchprobe.cli import geometry as geometry_module  # noqa: E402
 from searchprobe.cli import validate as validate_module  # noqa: E402
 from searchprobe.cli import perturb as perturb_module  # noqa: E402
 from searchprobe.cli import evolve as evolve_module  # noqa: E402
+from searchprobe.cli import session as session_module  # noqa: E402
 
 app.add_typer(run_module.app, name="run")
 app.add_typer(generate_module.app, name="generate")
@@ -59,6 +60,7 @@ app.add_typer(geometry_module.app, name="geometry")
 app.add_typer(validate_module.app, name="validate")
 app.add_typer(perturb_module.app, name="perturb")
 app.add_typer(evolve_module.app, name="evolve")
+app.add_typer(session_module.app, name="session")
 
 
 if __name__ == "__main__":

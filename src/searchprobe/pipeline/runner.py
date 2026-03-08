@@ -6,11 +6,13 @@ from datetime import datetime
 from typing import Any, Callable
 
 from searchprobe.config import Settings, get_settings
+from searchprobe.core.exceptions import BudgetExhaustedError, PipelineError, ProviderError
 from searchprobe.pipeline.cost_tracker import CostTracker
 from searchprobe.pipeline.rate_limiter import RateLimiterPool
 from searchprobe.providers.base import SearchProvider
 from searchprobe.providers.models import SearchRequest, SearchResponse
 from searchprobe.providers.registry import ProviderRegistry
+from searchprobe.providers.resilient import ResilientProvider
 from searchprobe.storage import Database
 
 
@@ -84,8 +86,8 @@ class BenchmarkRunner:
         self.rate_limiters = RateLimiterPool()
         self.cost_tracker = CostTracker(budget_limit=config.budget_limit)
 
-        # Provider instances
-        self._providers: dict[str, SearchProvider] = {}
+        # Provider instances (wrapped with resilience)
+        self._providers: dict[str, ResilientProvider] = {}
 
         # Progress callback
         self._progress_callback: Callable[[str, int, int], None] | None = None
@@ -100,10 +102,11 @@ class BenchmarkRunner:
         """
         self._progress_callback = callback
 
-    def _get_provider(self, name: str) -> SearchProvider:
-        """Get or create a provider instance."""
+    def _get_provider(self, name: str) -> ResilientProvider:
+        """Get or create a resilient provider instance."""
         if name not in self._providers:
-            self._providers[name] = ProviderRegistry.get_provider(name, self.settings)
+            raw_provider = ProviderRegistry.get_provider(name, self.settings)
+            self._providers[name] = ResilientProvider(raw_provider)
         return self._providers[name]
 
     async def run(
@@ -193,6 +196,8 @@ class BenchmarkRunner:
         for result in task_results:
             if isinstance(result, SearchResponse):
                 results.append(result)
+            elif isinstance(result, BudgetExhaustedError):
+                raise result
             elif isinstance(result, Exception):
                 # Log error but continue
                 pass
@@ -308,7 +313,7 @@ async def run_benchmark(
         providers = settings.configured_providers
 
     if not providers:
-        raise ValueError("No providers configured")
+        raise PipelineError("No providers configured")
 
     if exa_modes is None:
         exa_modes = ["auto"]
