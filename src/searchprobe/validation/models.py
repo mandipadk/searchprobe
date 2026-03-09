@@ -1,7 +1,7 @@
 """Data models for cross-encoder validation."""
 
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 
@@ -41,7 +41,7 @@ class ValidationResult:
     reranked_ndcg: float  # NDCG after cross-encoder reranking
     ndcg_improvement: float  # reranked - original
     kendall_tau: float  # Rank correlation original vs reranked
-    validated_at: datetime = field(default_factory=datetime.utcnow)
+    validated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
     def to_dict(self) -> dict[str, Any]:
         return {

@@ -1,7 +1,7 @@
 """Data models for the adversarial query optimizer."""
 
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
 
@@ -87,7 +87,7 @@ class OptimizationResult:
     total_evaluations: int
     total_cost: float
     fitness_history: list[dict[str, float]]  # generation -> {mean, max, min}
-    started_at: datetime = field(default_factory=datetime.utcnow)
+    started_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     completed_at: datetime | None = None
     config: EvolutionConfig | None = None
 

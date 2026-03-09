@@ -1,7 +1,7 @@
 """SerpAPI (Google) search provider implementation."""
 
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, ClassVar
 from urllib.parse import urlparse
 
@@ -25,12 +25,12 @@ class SerpAPIProvider(SearchProvider):
     def __init__(self, api_key: str) -> None:
         """Initialize SerpAPI client."""
         super().__init__(api_key)
-        self._client = None
+        self._client_class = None
 
     @property
     def client(self):
         """Lazy-load SerpAPI client."""
-        if self._client is None:
+        if self._client_class is None:
             from serpapi import GoogleSearch
 
             self._client_class = GoogleSearch
@@ -105,7 +105,7 @@ class SerpAPIProvider(SearchProvider):
                 results=results,
                 latency_ms=latency_ms,
                 cost_usd=total_cost,
-                timestamp=datetime.utcnow(),
+                timestamp=datetime.now(timezone.utc),
                 metadata={
                     "engine": "google",
                     "results_requested": request.num_results,
@@ -130,6 +130,6 @@ class SerpAPIProvider(SearchProvider):
                 results=[],
                 latency_ms=latency_ms,
                 cost_usd=0.0,
-                timestamp=datetime.utcnow(),
+                timestamp=datetime.now(timezone.utc),
                 error=error_msg,
             )

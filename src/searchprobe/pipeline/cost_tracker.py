@@ -1,7 +1,7 @@
 """Cost tracking for API usage."""
 
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 
@@ -12,7 +12,7 @@ class CostRecord:
     provider: str
     operation: str  # e.g., "search", "content"
     cost_usd: float
-    timestamp: datetime = field(default_factory=datetime.utcnow)
+    timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
@@ -25,7 +25,7 @@ class CostTracker:
             "search_auto": 0.005,
             "search_neural": 0.005,
             "search_fast": 0.005,
-            "search_deep": 0.015,
+            "search_deep": 0.005,
             "content": 0.001,  # per page
         },
         "tavily": {

@@ -1,6 +1,6 @@
 """Data models for queries and ground truth."""
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Literal
 from uuid import uuid4
 
@@ -98,7 +98,7 @@ class Query(BaseModel):
     metadata: dict[str, Any] = Field(
         default_factory=dict, description="Additional metadata"
     )
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
     # Why this query is adversarial
     adversarial_reason: str | None = Field(
@@ -113,7 +113,7 @@ class QuerySet(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid4()))
     name: str | None = Field(default=None, description="Human-readable name")
     queries: list[Query] = Field(default_factory=list)
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     config: dict[str, Any] = Field(
         default_factory=dict, description="Generation configuration"
     )

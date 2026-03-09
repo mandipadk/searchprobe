@@ -134,7 +134,7 @@ def perturb(
             progress.update(
                 task,
                 description=f"Perturbing: {query_text[:40]}...",
-                completed=index,
+                completed=index + 1,
             )
 
         report = asyncio.run(

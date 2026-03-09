@@ -1,7 +1,7 @@
 """Data models for embedding geometry analysis."""
 
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 
@@ -70,7 +70,7 @@ class GeometryReport:
 
     models: list[str]
     profiles: dict[str, dict[str, CategoryGeometryProfile]]  # model -> category -> profile
-    generated_at: datetime = field(default_factory=datetime.utcnow)
+    generated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     metadata: dict[str, Any] = field(default_factory=dict)
 
     def get_vulnerability_matrix(self) -> dict[str, dict[str, float]]:

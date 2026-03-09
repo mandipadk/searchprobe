@@ -2,7 +2,7 @@
 
 import asyncio
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Callable
 
 from searchprobe.config import Settings, get_settings
@@ -125,7 +125,7 @@ class BenchmarkRunner:
         Returns:
             BenchmarkResult with all responses
         """
-        started_at = datetime.utcnow()
+        started_at = datetime.now(timezone.utc)
 
         # Create run in database if not provided
         if run_id is None:
@@ -154,7 +154,12 @@ class BenchmarkRunner:
 
             # Check budget
             if self.cost_tracker.is_budget_exceeded():
-                return None
+                raise BudgetExhaustedError(
+                    f"Budget ${self.config.budget_limit:.2f} exceeded "
+                    f"(spent ${self.cost_tracker.get_total():.4f})",
+                    spent=self.cost_tracker.get_total(),
+                    limit=self.config.budget_limit,
+                )
 
             # Rate limit
             await self.rate_limiters.acquire(task.provider_name)
@@ -203,7 +208,7 @@ class BenchmarkRunner:
                 pass
 
         # Complete run
-        completed_at = datetime.utcnow()
+        completed_at = datetime.now(timezone.utc)
         self.db.complete_run(
             run_id,
             self.cost_tracker.get_total(),

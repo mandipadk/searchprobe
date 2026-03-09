@@ -3,7 +3,7 @@
 import json
 import sqlite3
 from contextlib import contextmanager
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Generator
 from uuid import uuid4
@@ -194,6 +194,9 @@ class Database:
         conn.row_factory = sqlite3.Row
         try:
             yield conn
+        except BaseException:
+            conn.rollback()
+            raise
         finally:
             conn.close()
 
@@ -296,7 +299,7 @@ class Database:
             conn.execute(
                 """INSERT INTO runs (id, name, query_set_id, started_at, config)
                    VALUES (?, ?, ?, ?, ?)""",
-                (run_id, name, query_set_id, datetime.utcnow().isoformat(), json.dumps(config or {})),
+                (run_id, name, query_set_id, datetime.now(timezone.utc).isoformat(), json.dumps(config or {})),
             )
             conn.commit()
         return run_id
@@ -310,7 +313,7 @@ class Database:
                 """UPDATE runs
                    SET completed_at = ?, cost_total = ?, cost_breakdown = ?
                    WHERE id = ?""",
-                (datetime.utcnow().isoformat(), cost_total, json.dumps(cost_breakdown), run_id),
+                (datetime.now(timezone.utc).isoformat(), cost_total, json.dumps(cost_breakdown), run_id),
             )
             conn.commit()
 
@@ -458,7 +461,7 @@ class Database:
                     evaluation.get("weighted_score", 0.0),
                     evaluation.get("overall_assessment", ""),
                     json.dumps(evaluation.get("failure_modes", [])),
-                    evaluation.get("evaluated_at", datetime.utcnow().isoformat()),
+                    evaluation.get("evaluated_at", datetime.now(timezone.utc).isoformat()),
                 ),
             )
             conn.commit()

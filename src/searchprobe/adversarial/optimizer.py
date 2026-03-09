@@ -1,7 +1,7 @@
 """Adversarial query optimizer — evolutionary loop for breeding worst-case queries."""
 
 import random
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Callable
 
 from searchprobe.adversarial.bandit import OperatorBandit
@@ -176,7 +176,7 @@ class AdversarialQueryOptimizer:
         Returns:
             OptimizationResult with best individuals and fitness history
         """
-        started_at = datetime.utcnow()
+        started_at = datetime.now(timezone.utc)
         fitness_history: list[dict[str, float]] = []
         total_evaluations = 0
 
@@ -242,6 +242,6 @@ class AdversarialQueryOptimizer:
             total_cost=0.0,  # Would be tracked by CostTracker in live mode
             fitness_history=fitness_history,
             started_at=started_at,
-            completed_at=datetime.utcnow(),
+            completed_at=datetime.now(timezone.utc),
             config=self.config,
         )

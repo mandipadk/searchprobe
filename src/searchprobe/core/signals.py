@@ -10,11 +10,14 @@ This is a simple synchronous observer pattern. No async, no threading.
 
 from __future__ import annotations
 
+import logging
 from collections import defaultdict
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Callable
+
+logger = logging.getLogger(__name__)
 
 
 class SignalType(Enum):
@@ -45,7 +48,7 @@ class Signal:
     source: str
     category: str | None = None
     data: dict[str, Any] = field(default_factory=dict)
-    timestamp: datetime = field(default_factory=datetime.utcnow)
+    timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 class SignalBus:
@@ -73,7 +76,12 @@ class SignalBus:
     def emit(self, signal: Signal) -> None:
         """Emit a signal, calling all registered handlers synchronously."""
         for handler in self._handlers.get(signal.type, []):
-            handler(signal)
+            try:
+                handler(signal)
+            except Exception:
+                logger.exception(
+                    "Handler %r failed for signal %s", handler, signal.type.value
+                )
 
     def clear(self) -> None:
         """Remove all handlers."""

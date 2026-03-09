@@ -181,9 +181,16 @@ class ResilientProvider:
                 cost_usd=0.0,
                 error=error_msg,
             )
-        except (ProviderError, RateLimitError):
+        except (ProviderError, RateLimitError) as exc:
             self.circuit_breaker.record_failure()
-            raise
+            return SearchResponse(
+                provider=self.provider.NAME,
+                search_mode=request.search_mode,
+                query=request.query,
+                results=[],
+                cost_usd=0.0,
+                error=str(exc),
+            )
         except Exception as exc:
             self.circuit_breaker.record_failure()
             return SearchResponse(

@@ -89,10 +89,14 @@ async def test_pipeline_budget_enforcement(integration_db, mock_provider, sample
         for q in queries
     ]
 
-    result = await runner.run(queries=query_dicts)
+    from searchprobe.core.exceptions import BudgetExhaustedError
 
-    # Should have completed some queries but budget should have been tracked
-    assert result.total_cost >= 0
+    with pytest.raises(BudgetExhaustedError) as exc_info:
+        await runner.run(queries=query_dicts)
+
+    # Should have tracked cost before exceeding budget
+    assert exc_info.value.spent > 0
+    assert exc_info.value.limit == 0.001
 
 
 def test_database_query_set_lifecycle(integration_db):

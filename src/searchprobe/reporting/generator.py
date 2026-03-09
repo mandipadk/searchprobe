@@ -1,7 +1,7 @@
 """Report generator for benchmark results."""
 
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -122,8 +122,8 @@ class ReportGenerator:
             all_geo_categories = set()
             scores = []
             for r in geo_results:
-                model = r["model_name"]
-                cat = r["category"]
+                model = r.get("model_name", "unknown")
+                cat = r.get("category", "unknown")
                 score = r.get("vulnerability_score", 0) or 0
                 all_models.add(model)
                 all_geo_categories.add(cat)
@@ -265,7 +265,7 @@ class ReportGenerator:
             "perturbation_data": perturbation_data,
             "validation_data": validation_data,
             "evolution_data": evolution_data,
-            "generated_at": datetime.utcnow().isoformat(),
+            "generated_at": datetime.now(timezone.utc).isoformat(),
         }
 
     def _get_failure_examples(
@@ -345,7 +345,7 @@ class ReportGenerator:
             providers = sorted(all_providers)
 
             header = "| Category | " + " | ".join(providers) + " |"
-            separator = "|----------|" + "|".join(["------"] * len(providers)) + "|"
+            separator = "|----------|" + " | ".join(["------"] * len(providers)) + " |"
             lines.extend([header, separator])
 
             for category, provider_scores in stats["by_category"].items():
@@ -373,7 +373,7 @@ class ReportGenerator:
                 cats = gd["categories"]
                 models = gd["models"]
                 header = "| Category | " + " | ".join(models) + " |"
-                sep = "|----------|" + "|".join(["------"] * len(models)) + "|"
+                sep = "|----------|" + " | ".join(["------"] * len(models)) + " |"
                 lines.extend([header, sep])
                 for cat in cats:
                     row = f"| {cat.replace('_', ' ').title()} |"

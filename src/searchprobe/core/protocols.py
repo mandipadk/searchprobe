@@ -8,7 +8,7 @@ structural subtyping -- no inheritance changes to existing modules required.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Protocol, runtime_checkable
 
 from searchprobe.core.signals import Signal
@@ -24,7 +24,7 @@ class AnalysisResult:
     summary: dict[str, Any] = field(default_factory=dict)
     details: list[dict[str, Any]] = field(default_factory=list)
     signals: list[Signal] = field(default_factory=list)
-    timestamp: datetime = field(default_factory=datetime.utcnow)
+    timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
     def get_metric(self, key: str, default: Any = None) -> Any:
         """Get a metric from the summary dict."""

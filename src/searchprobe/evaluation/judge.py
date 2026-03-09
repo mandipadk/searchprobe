@@ -3,7 +3,7 @@
 import json
 import re
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from searchprobe.config import Settings, get_anthropic_client, get_settings
@@ -39,7 +39,7 @@ class EvaluationResult:
     failure_modes: list[str]
     best_result_index: int | None
     overall_assessment: str
-    evaluated_at: datetime = field(default_factory=datetime.utcnow)
+    evaluated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     raw_response: str | None = None
     error: str | None = None
 

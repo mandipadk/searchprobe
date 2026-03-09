@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -62,10 +62,10 @@ class AsyncDatabase:
         config: dict[str, Any] | None = None,
     ) -> str:
         """Create a new benchmark run."""
-        run_id = str(uuid4())[:8]
+        run_id = str(uuid4())
         await self.conn.execute(
             "INSERT INTO runs (id, name, query_set_id, started_at, config) VALUES (?, ?, ?, ?, ?)",
-            (run_id, name or f"run-{run_id}", query_set_id, datetime.utcnow().isoformat(), json.dumps(config or {})),
+            (run_id, name or f"run-{run_id}", query_set_id, datetime.now(timezone.utc).isoformat(), json.dumps(config or {})),
         )
         await self.conn.commit()
         return run_id
@@ -79,7 +79,7 @@ class AsyncDatabase:
         """Mark a run as complete."""
         await self.conn.execute(
             "UPDATE runs SET completed_at = ?, cost_total = ?, cost_breakdown = ? WHERE id = ?",
-            (datetime.utcnow().isoformat(), total_cost, json.dumps(cost_breakdown), run_id),
+            (datetime.now(timezone.utc).isoformat(), total_cost, json.dumps(cost_breakdown), run_id),
         )
         await self.conn.commit()
 
@@ -102,7 +102,7 @@ class AsyncDatabase:
         response: Any,
     ) -> str:
         """Store a search result."""
-        result_id = str(uuid4())[:8]
+        result_id = str(uuid4())
         await self.conn.execute(
             """INSERT INTO search_results
                (id, run_id, query_id, provider, search_mode, results, latency_ms, cost_usd, error, timestamp)
@@ -151,7 +151,7 @@ class AsyncDatabase:
 
     async def add_evaluation(self, run_id: str, evaluation: dict[str, Any]) -> str:
         """Store an evaluation result."""
-        eval_id = str(uuid4())[:8]
+        eval_id = str(uuid4())
         await self.conn.execute(
             """INSERT INTO evaluations
                (id, run_id, query_id, provider, result_index, scores, weighted_score,
@@ -168,7 +168,7 @@ class AsyncDatabase:
                 evaluation.get("overall_assessment", ""),
                 json.dumps(evaluation.get("failure_modes", [])),
                 evaluation.get("judge_model"),
-                datetime.utcnow().isoformat(),
+                datetime.now(timezone.utc).isoformat(),
             ),
         )
         await self.conn.commit()

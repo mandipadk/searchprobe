@@ -1,7 +1,7 @@
 """Exa search provider implementation."""
 
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, ClassVar
 from urllib.parse import urlparse
 
@@ -27,7 +27,7 @@ class ExaProvider(SearchProvider):
         "auto": 0.005,
         "neural": 0.005,
         "fast": 0.005,
-        "deep": 0.015,
+        "deep": 0.005,  # "deep" maps to "auto" internally; same cost
     }
     # Content extraction cost per page
     CONTENT_COST_PER_PAGE: ClassVar[float] = 0.001
@@ -132,7 +132,7 @@ class ExaProvider(SearchProvider):
                 results=results,
                 latency_ms=latency_ms,
                 cost_usd=total_cost,
-                timestamp=datetime.utcnow(),
+                timestamp=datetime.now(timezone.utc),
                 metadata={
                     "search_type": mode,
                     "results_requested": request.num_results,
@@ -157,6 +157,6 @@ class ExaProvider(SearchProvider):
                 results=[],
                 latency_ms=latency_ms,
                 cost_usd=0.0,
-                timestamp=datetime.utcnow(),
+                timestamp=datetime.now(timezone.utc),
                 error=error_msg,
             )

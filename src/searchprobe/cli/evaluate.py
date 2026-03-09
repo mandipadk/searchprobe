@@ -114,18 +114,11 @@ def evaluate(
     judge = SearchJudge(settings)
 
     # Evaluate with progress
-    evaluated = 0
     all_evaluations = []
 
-    with Progress(
-        SpinnerColumn(),
-        TextColumn("[progress.description]{task.description}"),
-        BarColumn(),
-        TaskProgressColumn(),
-        console=console,
-    ) as progress:
-        task = progress.add_task("Evaluating...", total=len(results_to_eval))
-
+    async def _run_evaluations() -> list[dict]:
+        evaluated = 0
+        evals = []
         for result_item in results_to_eval:
             progress.update(
                 task,
@@ -136,22 +129,31 @@ def evaluate(
             search_response = _reconstruct_response(result_item)
 
             # Evaluate
-            evaluation = asyncio.run(
-                judge.evaluate(
-                    query_id=result_item["query_id"],
-                    query_text=result_item["query_text"],
-                    category=result_item["category"],
-                    search_response=search_response,
-                    ground_truth=result_item.get("ground_truth"),
-                )
+            evaluation = await judge.evaluate(
+                query_id=result_item["query_id"],
+                query_text=result_item["query_text"],
+                category=result_item["category"],
+                search_response=search_response,
+                ground_truth=result_item.get("ground_truth"),
             )
 
             # Store evaluation
             db.add_evaluation(actual_run_id, evaluation.to_dict())
-            all_evaluations.append(evaluation.to_dict())
+            evals.append(evaluation.to_dict())
 
             evaluated += 1
             progress.update(task, completed=evaluated)
+        return evals
+
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        BarColumn(),
+        TaskProgressColumn(),
+        console=console,
+    ) as progress:
+        task = progress.add_task("Evaluating...", total=len(results_to_eval))
+        all_evaluations = asyncio.run(_run_evaluations())
 
     console.print(f"\n[green]Evaluated {evaluated} results[/green]")
 
