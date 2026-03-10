@@ -4,7 +4,7 @@ import json
 import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Callable
 
 from searchprobe.config import Settings, get_anthropic_client, get_settings
 from searchprobe.core.exceptions import ConfigurationError, EvaluationError
@@ -241,24 +241,41 @@ class SearchJudge:
     async def evaluate_batch(
         self,
         evaluations: list[dict],
+        max_concurrent: int = 5,
+        on_complete: Callable[[EvaluationResult, int], None] | None = None,
     ) -> list[EvaluationResult]:
-        """Evaluate multiple query results.
+        """Evaluate multiple query results concurrently.
 
         Args:
             evaluations: List of dicts with query_id, query_text, category,
                         search_response, and optional ground_truth
+            max_concurrent: Maximum concurrent LLM calls
+            on_complete: Optional callback(result, index) after each evaluation
 
         Returns:
-            List of EvaluationResults
+            List of EvaluationResults in original order
         """
-        results = []
-        for eval_item in evaluations:
-            result = await self.evaluate(
-                query_id=eval_item["query_id"],
-                query_text=eval_item["query_text"],
-                category=eval_item["category"],
-                search_response=eval_item["search_response"],
-                ground_truth=eval_item.get("ground_truth"),
-            )
-            results.append(result)
-        return results
+        import asyncio
+
+        semaphore = asyncio.Semaphore(max_concurrent)
+
+        async def _bounded_evaluate(index: int, eval_item: dict) -> tuple[int, EvaluationResult]:
+            async with semaphore:
+                result = await self.evaluate(
+                    query_id=eval_item["query_id"],
+                    query_text=eval_item["query_text"],
+                    category=eval_item["category"],
+                    search_response=eval_item["search_response"],
+                    ground_truth=eval_item.get("ground_truth"),
+                )
+                if on_complete:
+                    on_complete(result, index)
+                return index, result
+
+        indexed_results = await asyncio.gather(
+            *[_bounded_evaluate(i, e) for i, e in enumerate(evaluations)]
+        )
+
+        # Restore original order
+        indexed_results.sort(key=lambda x: x[0])
+        return [r for _, r in indexed_results]

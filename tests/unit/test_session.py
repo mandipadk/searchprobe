@@ -82,6 +82,66 @@ class TestSessionRun:
         assert len(calls) == 2  # "only" + "done"
 
 
+class TestTopologicalLevels:
+    def test_independent_stages_single_level(self):
+        session = ResearchSession()
+        session.add_stage(MockStage(name="a"))
+        session.add_stage(MockStage(name="b"))
+        session.add_stage(MockStage(name="c"))
+        levels = session._topological_levels()
+        assert len(levels) == 1
+        assert set(levels[0]) == {"a", "b", "c"}
+
+    def test_diamond_produces_three_levels(self):
+        session = ResearchSession()
+        session.add_stage(MockStage(name="a"))
+        session.add_stage(MockStage(name="b", depends_on=["a"]))
+        session.add_stage(MockStage(name="c", depends_on=["a"]))
+        session.add_stage(MockStage(name="d", depends_on=["b", "c"]))
+        levels = session._topological_levels()
+        assert len(levels) == 3
+        assert levels[0] == ["a"]
+        assert set(levels[1]) == {"b", "c"}
+        assert levels[2] == ["d"]
+
+    def test_linear_chain_all_single_levels(self):
+        session = ResearchSession()
+        session.add_stage(MockStage(name="a"))
+        session.add_stage(MockStage(name="b", depends_on=["a"]))
+        session.add_stage(MockStage(name="c", depends_on=["b"]))
+        levels = session._topological_levels()
+        assert levels == [["a"], ["b"], ["c"]]
+
+
+class TestParallelExecution:
+    @pytest.mark.asyncio
+    async def test_parallel_stages_all_execute(self):
+        """Independent stages should all execute when run in parallel."""
+        session = ResearchSession()
+        stages = [MockStage(name="a"), MockStage(name="b"), MockStage(name="c")]
+        for s in stages:
+            session.add_stage(s)
+
+        context = await session.run()
+        assert all(s.executed for s in stages)
+        assert set(context.results.keys()) == {"a", "b", "c"}
+
+    @pytest.mark.asyncio
+    async def test_diamond_parallel_execution(self):
+        """Diamond DAG: a -> {b, c} -> d. b and c should run in parallel."""
+        session = ResearchSession()
+        a = MockStage(name="a")
+        b = MockStage(name="b", depends_on=["a"])
+        c = MockStage(name="c", depends_on=["a"])
+        d = MockStage(name="d", depends_on=["b", "c"])
+        for s in [a, b, c, d]:
+            session.add_stage(s)
+
+        context = await session.run()
+        assert all(s.executed for s in [a, b, c, d])
+        assert set(context.results.keys()) == {"a", "b", "c", "d"}
+
+
 class TestSharedContext:
     def test_add_result_tracks_vulnerability(self):
         ctx = SharedContext()

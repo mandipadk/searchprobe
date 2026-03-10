@@ -449,18 +449,20 @@ class Database:
         with self._get_connection() as conn:
             conn.execute(
                 """INSERT INTO evaluations
-                   (id, run_id, query_id, provider, scores, weighted_score,
-                    reasoning, failure_mode, timestamp)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                   (id, run_id, query_id, provider, result_index, scores,
+                    weighted_score, reasoning, failure_mode, judge_model, timestamp)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     eval_id,
                     run_id,
                     evaluation.get("query_id"),
                     evaluation.get("provider"),
+                    evaluation.get("best_result_index"),
                     json.dumps(evaluation.get("dimension_scores", {})),
                     evaluation.get("weighted_score", 0.0),
                     evaluation.get("overall_assessment", ""),
                     json.dumps(evaluation.get("failure_modes", [])),
+                    evaluation.get("judge_model"),
                     evaluation.get("evaluated_at", datetime.now(timezone.utc).isoformat()),
                 ),
             )
@@ -756,6 +758,110 @@ class Database:
                     r["perturbed_results"] = json.loads(r["perturbed_results"])
                 results.append(r)
             return results
+
+    # Aggregate Materialization
+    def materialize_aggregate_scores(self, run_id: str) -> int:
+        """Compute and store aggregate scores for a run.
+
+        Replaces any existing aggregates for this run, then computes
+        per-(provider, category, dimension) statistics from evaluations.
+
+        Returns:
+            Number of aggregate rows inserted.
+        """
+        with self._get_connection() as conn:
+            conn.execute("DELETE FROM aggregate_scores WHERE run_id = ?", (run_id,))
+
+            # Fetch evaluations with category info
+            rows = conn.execute(
+                """SELECT e.provider, q.category, e.scores, e.weighted_score,
+                          e.failure_mode
+                   FROM evaluations e
+                   JOIN queries q ON e.query_id = q.id
+                   WHERE e.run_id = ?""",
+                (run_id,),
+            ).fetchall()
+
+            if not rows:
+                conn.commit()
+                return 0
+
+            # Build aggregation: (provider, category, dimension) -> list of scores
+            from collections import defaultdict
+            import math
+
+            buckets: dict[tuple[str, str, str], list[float]] = defaultdict(list)
+            failure_counts: dict[tuple[str, str], tuple[int, int]] = defaultdict(lambda: (0, 0))
+
+            for row in rows:
+                provider = row["provider"]
+                category = row["category"]
+                scores_json = row["scores"]
+                failure_json = row["failure_mode"]
+
+                # Track overall weighted score under dimension="overall"
+                buckets[(provider, category, "overall")].append(
+                    row["weighted_score"] or 0.0
+                )
+
+                # Track per-dimension scores
+                if scores_json:
+                    dim_scores = json.loads(scores_json)
+                    for dim_name, dim_data in dim_scores.items():
+                        score = dim_data.get("score", 0.0) if isinstance(dim_data, dict) else dim_data
+                        buckets[(provider, category, dim_name)].append(float(score))
+
+                # Track failures
+                key = (provider, category)
+                total, fails = failure_counts[key]
+                has_failure = bool(failure_json and failure_json != "[]")
+                failure_counts[key] = (total + 1, fails + (1 if has_failure else 0))
+
+            # Insert aggregated rows
+            count = 0
+            for (provider, category, dimension), scores in buckets.items():
+                n = len(scores)
+                mean = sum(scores) / n
+                variance = sum((s - mean) ** 2 for s in scores) / n if n > 1 else 0.0
+                std = math.sqrt(variance)
+                se = std / math.sqrt(n) if n > 1 else 0.0
+                ci_lower = mean - 1.96 * se
+                ci_upper = mean + 1.96 * se
+
+                total, fails = failure_counts.get((provider, category), (0, 0))
+                failure_rate = fails / total if total > 0 else 0.0
+
+                conn.execute(
+                    """INSERT INTO aggregate_scores
+                       (run_id, provider, category, dimension, mean_score,
+                        std_score, ci_lower, ci_upper, n_queries, failure_rate)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (run_id, provider, category, dimension, mean,
+                     std, ci_lower, ci_upper, n, failure_rate),
+                )
+                count += 1
+
+            conn.commit()
+            return count
+
+    def get_aggregate_scores(
+        self,
+        run_id: str,
+        provider: str | None = None,
+        category: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Get pre-computed aggregate scores for a run."""
+        query = "SELECT * FROM aggregate_scores WHERE run_id = ?"
+        params: list[Any] = [run_id]
+        if provider:
+            query += " AND provider = ?"
+            params.append(provider)
+        if category:
+            query += " AND category = ?"
+            params.append(category)
+        with self._get_connection() as conn:
+            rows = conn.execute(query, params).fetchall()
+            return [dict(row) for row in rows]
 
     # Stats
     def get_run_stats(self, run_id: str) -> dict[str, Any]:

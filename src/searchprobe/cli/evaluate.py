@@ -113,37 +113,38 @@ def evaluate(
     # Initialize judge
     judge = SearchJudge(settings)
 
-    # Evaluate with progress
+    # Build evaluation batch
+    eval_batch = []
+    for result_item in results_to_eval:
+        search_response = _reconstruct_response(result_item)
+        eval_batch.append({
+            "query_id": result_item["query_id"],
+            "query_text": result_item["query_text"],
+            "category": result_item["category"],
+            "search_response": search_response,
+            "ground_truth": result_item.get("ground_truth"),
+        })
+
+    # Evaluate concurrently with progress
     all_evaluations = []
+    completed_count = 0
 
-    async def _run_evaluations() -> list[dict]:
-        evaluated = 0
-        evals = []
-        for result_item in results_to_eval:
-            progress.update(
-                task,
-                description=f"Evaluating: {result_item['query_text'][:40]}...",
-            )
+    def _on_complete(result, index):
+        nonlocal completed_count
+        db.add_evaluation(actual_run_id, result.to_dict())
+        completed_count += 1
+        progress.update(
+            task,
+            description=f"Evaluated: {results_to_eval[index]['query_text'][:40]}...",
+            completed=completed_count,
+        )
 
-            # Reconstruct SearchResponse from stored data
-            search_response = _reconstruct_response(result_item)
-
-            # Evaluate
-            evaluation = await judge.evaluate(
-                query_id=result_item["query_id"],
-                query_text=result_item["query_text"],
-                category=result_item["category"],
-                search_response=search_response,
-                ground_truth=result_item.get("ground_truth"),
-            )
-
-            # Store evaluation
-            db.add_evaluation(actual_run_id, evaluation.to_dict())
-            evals.append(evaluation.to_dict())
-
-            evaluated += 1
-            progress.update(task, completed=evaluated)
-        return evals
+    async def _run_evaluations():
+        return await judge.evaluate_batch(
+            eval_batch,
+            max_concurrent=5,
+            on_complete=_on_complete,
+        )
 
     with Progress(
         SpinnerColumn(),
@@ -153,9 +154,15 @@ def evaluate(
         console=console,
     ) as progress:
         task = progress.add_task("Evaluating...", total=len(results_to_eval))
-        all_evaluations = asyncio.run(_run_evaluations())
+        eval_results = asyncio.run(_run_evaluations())
+        all_evaluations = [r.to_dict() for r in eval_results]
 
-    console.print(f"\n[green]Evaluated {evaluated} results[/green]")
+    console.print(f"\n[green]Evaluated {len(all_evaluations)} results[/green]")
+
+    # Materialize aggregate scores for fast reporting
+    agg_count = db.materialize_aggregate_scores(actual_run_id)
+    if agg_count:
+        console.print(f"[dim]Materialized {agg_count} aggregate score rows[/dim]")
 
     # Show summary
     _display_summary(all_evaluations, show_comparisons)

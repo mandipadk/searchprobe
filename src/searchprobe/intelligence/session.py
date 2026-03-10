@@ -89,6 +89,19 @@ class ResearchSession:
         Raises:
             ValueError: If circular dependencies are detected.
         """
+        levels = self._topological_levels()
+        return [name for level in levels for name in level]
+
+    def _topological_levels(self) -> list[list[str]]:
+        """Group stages into dependency levels for parallel execution.
+
+        Returns:
+            List of levels, where each level is a list of stage names
+            that can execute concurrently.
+
+        Raises:
+            ValueError: If circular dependencies are detected.
+        """
         in_degree: dict[str, int] = defaultdict(int)
         adjacency: dict[str, list[str]] = defaultdict(list)
 
@@ -99,29 +112,35 @@ class ResearchSession:
                     adjacency[dep].append(name)
                     in_degree[name] += 1
 
-        # BFS (Kahn's algorithm)
+        # BFS (Kahn's algorithm) with level tracking
         queue = [name for name in self.stages if in_degree[name] == 0]
-        order: list[str] = []
+        levels: list[list[str]] = []
+        processed = 0
 
         while queue:
-            current = queue.pop(0)
-            order.append(current)
-            for neighbor in adjacency[current]:
-                in_degree[neighbor] -= 1
-                if in_degree[neighbor] == 0:
-                    queue.append(neighbor)
+            levels.append(list(queue))
+            next_queue: list[str] = []
+            for current in queue:
+                processed += 1
+                for neighbor in adjacency[current]:
+                    in_degree[neighbor] -= 1
+                    if in_degree[neighbor] == 0:
+                        next_queue.append(neighbor)
+            queue = next_queue
 
-        if len(order) != len(self.stages):
-            missing = set(self.stages.keys()) - set(order)
+        if processed != len(self.stages):
+            missing = set(self.stages.keys()) - {n for lvl in levels for n in lvl}
             raise ValueError(f"Circular dependency detected involving: {missing}")
 
-        return order
+        return levels
 
     async def run(
         self,
         progress_callback: Callable[[str, int, int], None] | None = None,
     ) -> SharedContext:
-        """Execute all stages in topological order.
+        """Execute all stages in dependency-level order.
+
+        Stages within the same level (no inter-dependencies) run concurrently.
 
         Args:
             progress_callback: Optional callback(stage_name, completed, total).
@@ -129,46 +148,71 @@ class ResearchSession:
         Returns:
             SharedContext with all accumulated results.
         """
-        order = self._topological_sort()
-        total = len(order)
+        levels = self._topological_levels()
+        total = sum(len(lvl) for lvl in levels)
+        completed = 0
 
-        for i, stage_name in enumerate(order):
-            stage = self.stages[stage_name]
-
-            if progress_callback:
-                progress_callback(stage_name, i, total)
-
-            self.signal_bus.emit(Signal(
-                type=SignalType.STAGE_STARTED,
-                source="session",
-                data={"stage": stage_name, "index": i, "total": total},
-            ))
-
-            logger.info("Executing stage: %s (%d/%d)", stage_name, i + 1, total)
-
-            try:
-                result = await stage.execute(self.context)
-                self.context.add_result(stage_name, result)
+        for level in levels:
+            async def _execute_stage(stage_name: str) -> tuple[str, AnalysisResult]:
+                if progress_callback:
+                    progress_callback(stage_name, completed, total)
 
                 self.signal_bus.emit(Signal(
-                    type=SignalType.STAGE_COMPLETED,
+                    type=SignalType.STAGE_STARTED,
                     source="session",
-                    data={
-                        "stage": stage_name,
-                        "summary": result.summary,
-                        "signal_count": len(result.signals),
-                    },
+                    data={"stage": stage_name, "total": total},
                 ))
 
-                logger.info(
-                    "Stage %s completed: %d signals emitted",
-                    stage_name,
-                    len(result.signals),
-                )
+                logger.info("Executing stage: %s", stage_name)
 
-            except Exception:
-                logger.exception("Stage %s failed", stage_name)
-                raise
+                stage = self.stages[stage_name]
+                result = await stage.execute(self.context)
+                return stage_name, result
+
+            if len(level) == 1:
+                # Single stage — run directly
+                stage_name = level[0]
+                try:
+                    _, result = await _execute_stage(stage_name)
+                    self.context.add_result(stage_name, result)
+                    self.signal_bus.emit(Signal(
+                        type=SignalType.STAGE_COMPLETED,
+                        source="session",
+                        data={
+                            "stage": stage_name,
+                            "summary": result.summary,
+                            "signal_count": len(result.signals),
+                        },
+                    ))
+                    logger.info("Stage %s completed: %d signals", stage_name, len(result.signals))
+                except Exception:
+                    logger.exception("Stage %s failed", stage_name)
+                    raise
+                completed += 1
+            else:
+                # Multiple independent stages — run concurrently
+                logger.info("Running %d stages in parallel: %s", len(level), level)
+                try:
+                    results = await asyncio.gather(
+                        *[_execute_stage(name) for name in level]
+                    )
+                except Exception:
+                    logger.exception("Parallel stage execution failed")
+                    raise
+
+                for stage_name, result in results:
+                    self.context.add_result(stage_name, result)
+                    self.signal_bus.emit(Signal(
+                        type=SignalType.STAGE_COMPLETED,
+                        source="session",
+                        data={
+                            "stage": stage_name,
+                            "summary": result.summary,
+                            "signal_count": len(result.signals),
+                        },
+                    ))
+                    logger.info("Stage %s completed: %d signals", stage_name, len(result.signals))
+                    completed += 1
 
         if progress_callback:
             progress_callback("done", total, total)
