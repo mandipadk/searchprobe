@@ -74,6 +74,14 @@ analysis = [
 modal = [
     "modal>=0.73",
 ]
+aris = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    "trafilatura>=1.8",
+    "rank-bm25>=0.2",
+    "chromadb>=0.5",
+    "duckduckgo-search>=7.0",
+]
 dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.23",
@@ -86,9 +94,10 @@ dev = [
 
 [project.scripts]
 searchprobe = "searchprobe.cli.app:app"
+aris = "aris.cli.app:app"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/searchprobe"]
+packages = ["src/searchprobe", "src/aris"]
 
 [tool.ruff]
 line-length = 100

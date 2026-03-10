@@ -1,0 +1,28 @@
+name = "Full System Test"
+description = "Comprehensive test of all SearchProbe modules with limited queries"
+
+providers = ["exa"]
+exa_modes = ["auto"]
+
+categories = ["negation", "polysemy", "antonym_confusion", "compositional"]
+queries_per_category = 3
+difficulty = "medium"
+
+run_geometry = true
+run_perturbation = true
+run_validation = false
+run_evolution = true
+
+geometry_models = ["all-MiniLM-L6-v2"]
+
+perturbation_operators = ["word_delete", "word_swap"]
+perturbation_variants = 3
+
+evolution_generations = 3
+evolution_population = 8
+evolution_fitness_mode = "embedding_sim"
+evolution_budget = 1.0
+
+num_results = 5
+budget_limit = 5.0
+max_concurrent = 3
