@@ -71,6 +71,8 @@ data/results/
 reports/
 *.db
 searchprobe.db
+*.db-shm
+*.db-wal
 
 # Streamlit
 .streamlit/secrets.toml
