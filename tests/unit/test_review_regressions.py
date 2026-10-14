@@ -562,3 +562,72 @@ def test_cancelled_evaluation_releases_its_reservation():
 
     asyncio.run(go())
     assert tracker.reserved_total == 0
+
+
+# --- fifth review round -------------------------------------------------------------
+
+
+def test_reservation_waits_for_outstanding_reservations_to_settle():
+    tracker = CostTracker(budget_limit=1.0)
+
+    async def go():
+        held = tracker.try_reserve(0.9)  # a concurrent task's generous estimate
+
+        async def finish():
+            await asyncio.sleep(0.05)
+            tracker.commit(held, "p", "search", 0.1)  # it actually cost 0.1
+
+        settle = asyncio.create_task(finish())
+        rid = await tracker.reserve(0.5)  # does not fit now, fits once the other settles
+        await settle
+        return rid
+
+    assert asyncio.run(go()) is not None  # the 0.5 reservation is still held here
+    # Cannot fit even if everything in flight settled at zero: refused without waiting.
+    assert asyncio.run(asyncio.wait_for(tracker.reserve(10), timeout=1)) is None
+
+
+def test_cancelling_a_duplicate_waiter_does_not_break_the_shared_evaluation():
+    class Provider:
+        async def search(self, request):
+            await asyncio.sleep(0.05)
+            return SearchResponse(provider="p", query=request.query)
+
+    class Judge:
+        async def evaluate(self, query_id, query_text, category, search_response):
+            class E:
+                cost_usd = 0.0
+                counts_for_quality = True
+                weighted_score = 0.5
+
+            return E()
+
+    ev = FitnessEvaluator(mode="llm_judge", provider=Provider(), judge=Judge())
+
+    async def go():
+        task = asyncio.create_task(
+            ev.evaluate_population([Individual(query="q"), Individual(query="q")]))
+        await asyncio.sleep(0.01)
+        task.cancel()
+        await task
+
+    # Cancellation surfaces as CancelledError, not InvalidStateError from the shared future.
+    with pytest.raises(asyncio.CancelledError):
+        asyncio.run(go())
+
+
+def test_candidates_evaluated_past_the_budget_are_not_admitted():
+    from searchprobe.discovery.search import Evaluation, discover
+
+    class Evaluator:
+        budget_exhausted = False
+        cost_tracker = None
+
+        async def evaluate(self, case):
+            self.budget_exhausted = True  # ran out of budget part-way
+            return Evaluation(0.9, None, None, True)
+
+    case = TestCase(text="companies", category="negation",
+                    constraints=[TopicConstraint(id="c1", subject="a company")])
+    result = asyncio.run(discover([case], Evaluator(), iterations=5, reevaluate=0))
+    assert result.archive.elites() == []

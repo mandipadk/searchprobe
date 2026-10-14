@@ -183,7 +183,7 @@ class BenchmarkRunner:
                     return response
                 # Reserve the estimated cost *before* dispatch so concurrent tasks
                 # cannot collectively overspend the budget.
-                reservation = self.cost_tracker.try_reserve(provider.estimate_cost(request))
+                reservation = await self.cost_tracker.reserve(provider.estimate_cost(request))
                 if reservation is None:
                     skipped_for_budget += 1
                     return None

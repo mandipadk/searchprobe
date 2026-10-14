@@ -208,7 +208,10 @@ async def discover(
     for case in seeds:
         if evaluator.budget_exhausted:
             break
-        archive.consider(case, await evaluator.evaluate(case))
+        seed_eval = await evaluator.evaluate(case)
+        if evaluator.budget_exhausted:  # partially judged: not admitted
+            break
+        archive.consider(case, seed_eval)
         evaluated += 1
 
     mutation_names = list(RULE_MUTATIONS) + (["llm_rephrase"] if llm else [])
@@ -235,6 +238,8 @@ async def discover(
         if child is None or not archive.is_new(child):
             continue
         ev = await evaluator.evaluate(child)
+        if evaluator.budget_exhausted:  # partially judged: not admitted
+            break
         evaluated += 1
         accepted += archive.consider(child, ev)
         if progress:

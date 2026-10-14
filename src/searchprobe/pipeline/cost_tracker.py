@@ -7,6 +7,7 @@ many concurrent tasks all pass a "spent < budget" check before any cost is
 recorded.
 """
 
+import asyncio
 import threading
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -78,6 +79,24 @@ class CostTracker:
             self._next_reservation += 1
             self._reserved[rid] = estimate_usd
             return rid
+
+    async def reserve(self, estimate_usd: float, poll_seconds: float = 0.02) -> int | None:
+        """Like :meth:`try_reserve`, but while other reservations are outstanding, wait
+        for them to settle and retry: they usually commit less than they reserved.
+
+        Returns None when the estimate cannot fit even if every outstanding reservation
+        settled at zero cost (waiting would be pointless), or once nothing is in flight.
+        """
+        while True:
+            rid = self.try_reserve(estimate_usd)
+            if rid is not None or self.reserved_total == 0:
+                return rid
+            if (
+                self.budget_limit is not None
+                and self.get_total() + estimate_usd > self.budget_limit + 1e-12
+            ):
+                return None
+            await asyncio.sleep(poll_seconds)
 
     def release(self, reservation: int | None) -> None:
         """Release a reservation without recording cost (operation not run)."""

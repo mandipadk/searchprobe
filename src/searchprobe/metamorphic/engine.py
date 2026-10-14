@@ -73,7 +73,7 @@ class MetamorphicEngine:
             estimate = (
                 provider.estimate_cost(request) if hasattr(provider, "estimate_cost") else 0.0
             )
-            reservation = self.cost_tracker.try_reserve(estimate)
+            reservation = await self.cost_tracker.reserve(estimate)
             if reservation is None:
                 run.skipped_for_budget += 1
                 return None, "budget exhausted"
@@ -178,7 +178,7 @@ class MetamorphicEngine:
                 return decided
             reservation = None
             if self.cost_tracker is not None:
-                reservation = self.cost_tracker.try_reserve(judge_cost_estimate)
+                reservation = await self.cost_tracker.reserve(judge_cost_estimate)
                 if reservation is None:
                     run.skipped_for_budget += 1
                     return None

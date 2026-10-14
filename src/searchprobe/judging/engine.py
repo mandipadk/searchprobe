@@ -239,7 +239,7 @@ class JudgingEngine:
 
         reservation = None
         if self.cost_tracker is not None:
-            reservation = self.cost_tracker.try_reserve(self.estimated_cost_per_call)
+            reservation = await self.cost_tracker.reserve(self.estimated_cost_per_call)
             if reservation is None:
                 out.skipped_for_budget += 1
                 return None

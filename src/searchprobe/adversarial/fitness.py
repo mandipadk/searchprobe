@@ -97,7 +97,8 @@ class FitnessEvaluator:
                 ind.fitness = self._cache[key]
                 return
             if key in inflight:  # a duplicate in this population: share its evaluation
-                ind.fitness = await inflight[key]
+                # Shielded: cancelling this waiter must not cancel the shared result.
+                ind.fitness = await asyncio.shield(inflight[key])
                 return
             future: asyncio.Future[float] = asyncio.get_running_loop().create_future()
             inflight[key] = future
@@ -106,7 +107,7 @@ class FitnessEvaluator:
                 async with semaphore:
                     reservation = None
                     if live and self.cost_tracker is not None:
-                        reservation = self.cost_tracker.try_reserve(self._estimate_cost())
+                        reservation = await self.cost_tracker.reserve(self._estimate_cost())
                         if reservation is None:
                             self.budget_exhausted = True
                             return
@@ -126,8 +127,9 @@ class FitnessEvaluator:
                     self._cache[key] = fitness
             finally:
                 ind.fitness = fitness
-                future.set_result(fitness)
-                del inflight[key]
+                if not future.done():
+                    future.set_result(fitness)
+                inflight.pop(key, None)
 
         await asyncio.gather(*[_one(ind) for ind in individuals])
         return individuals
