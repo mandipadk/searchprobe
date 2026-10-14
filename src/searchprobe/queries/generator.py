@@ -1,10 +1,12 @@
 """LLM-based query generation for creative adversarial probing."""
 
+import asyncio
 from typing import Any
 
 from pydantic import BaseModel
 
-from searchprobe.config import get_anthropic_client, get_settings
+from searchprobe.config import get_settings
+from searchprobe.llm import get_async_client, structured_call
 from searchprobe.queries.models import GroundTruth, Query, QuerySet
 from searchprobe.queries.seeds import load_all_seeds
 from searchprobe.queries.taxonomy import (
@@ -52,43 +54,121 @@ For each query, provide:
 - The query text
 - Difficulty level (medium or hard)
 - Why this query is adversarial (brief explanation)
-- Ground truth hints (how to verify correctness)
-
-## Response Format
-
-Respond with a JSON object containing a "queries" array:
-```json
-{{
-  "queries": [
-    {{
-      "text": "the query text",
-      "difficulty": "medium" or "hard",
-      "adversarial_reason": "why this challenges embeddings",
-      "ground_truth_hints": "how to verify results are correct"
-    }}
-  ]
-}}
-```
+- Machine-usable ground truth: fill every field that applies (use empty lists /
+  null otherwise). Exclusions are things results must NOT BE (not merely mention).
+- verification_guidance: how a reviewer would check a result
 
 Generate exactly {count} queries. Be creative but realistic.
 """
 
 
-class QueryGenerator:
-    """Generates adversarial queries using LLM."""
+GENERATION_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "queries": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "text": {"type": "string"},
+                    "difficulty": {"type": "string", "enum": ["medium", "hard"]},
+                    "adversarial_reason": {"type": "string"},
+                    "must_contain_keywords": {"type": "array", "items": {"type": "string"}},
+                    "must_not_contain_keywords": {"type": "array", "items": {"type": "string"}},
+                    "expected_entity": {"anyOf": [{"type": "string"}, {"type": "null"}]},
+                    "numeric_min": {"anyOf": [{"type": "number"}, {"type": "null"}]},
+                    "numeric_max": {"anyOf": [{"type": "number"}, {"type": "null"}]},
+                    "date_min": {"anyOf": [{"type": "string"}, {"type": "null"}]},
+                    "date_max": {"anyOf": [{"type": "string"}, {"type": "null"}]},
+                    "expected_language": {"anyOf": [{"type": "string"}, {"type": "null"}]},
+                    "expected_types": {"type": "array", "items": {"type": "string"}},
+                    "verification_guidance": {"type": "string"},
+                },
+                "required": [
+                    "text",
+                    "difficulty",
+                    "adversarial_reason",
+                    "must_contain_keywords",
+                    "must_not_contain_keywords",
+                    "expected_entity",
+                    "numeric_min",
+                    "numeric_max",
+                    "date_min",
+                    "date_max",
+                    "expected_language",
+                    "expected_types",
+                    "verification_guidance",
+                ],
+                "additionalProperties": False,
+            },
+        }
+    },
+    "required": ["queries"],
+    "additionalProperties": False,
+}
 
-    def __init__(self, model: str | None = None, temperature: float = 0.9):
-        """Initialize the generator."""
+GENERATION_SYSTEM = (
+    "You design adversarial test queries for evaluating search engines. "
+    "Every query must be realistic, answerable from the public web, and checkable."
+)
+
+
+def _ground_truth_from_item(item: dict[str, Any]) -> GroundTruth:
+    """Convert a generated item into GroundTruth, choosing the most specific strategy."""
+    fields = {
+        "must_contain_keywords": item.get("must_contain_keywords") or None,
+        "must_not_contain_keywords": item.get("must_not_contain_keywords") or None,
+        "expected_entity": item.get("expected_entity"),
+        "numeric_min": item.get("numeric_min"),
+        "numeric_max": item.get("numeric_max"),
+        "date_min": item.get("date_min"),
+        "date_max": item.get("date_max"),
+        "expected_language": item.get("expected_language"),
+        "expected_types": item.get("expected_types") or None,
+        "manual_judgment": item.get("verification_guidance") or None,
+    }
+    for key in ("date_min", "date_max"):
+        if fields[key]:
+            try:
+                from datetime import datetime
+
+                datetime.fromisoformat(fields[key])
+            except ValueError:
+                fields[key] = None
+    if fields["must_not_contain_keywords"]:
+        strategy = "must_not_contain"
+    elif fields["numeric_min"] is not None or fields["numeric_max"] is not None:
+        strategy = "numeric_range"
+    elif fields["date_min"] or fields["date_max"]:
+        strategy = "date_range"
+    elif fields["expected_entity"]:
+        strategy = "entity_match"
+    elif fields["expected_language"]:
+        strategy = "language_match"
+    elif fields["expected_types"]:
+        strategy = "type_match"
+    elif fields["must_contain_keywords"]:
+        strategy = "must_contain"
+    else:
+        strategy = "manual"
+    return GroundTruth(strategy=strategy, **{k: v for k, v in fields.items() if v is not None})
+
+
+class QueryGenerator:
+    """Generates adversarial queries using an LLM with schema-validated output."""
+
+    def __init__(self, model: str | None = None, client: Any | None = None):
         settings = get_settings()
+        self.settings = settings
         self.model = model or settings.generation_model
-        self.temperature = temperature
-        self._client = None
+        self.effort = settings.generation_effort
+        self._client = client
 
     @property
-    def client(self):
-        """Lazy-load Anthropic client (direct API or Vertex AI)."""
+    def client(self) -> Any:
+        """Lazy-load the async Anthropic client (direct API or Vertex AI)."""
         if self._client is None:
-            self._client = get_anthropic_client()
+            self._client = get_async_client(self.settings)
         return self._client
 
     def generate_for_category(
@@ -97,10 +177,17 @@ class QueryGenerator:
         count: int = 10,
         existing_queries: list[str] | None = None,
     ) -> list[Query]:
-        """Generate adversarial queries for a specific category using LLM."""
-        metadata = get_category_metadata(category)
+        """Synchronous wrapper around :meth:`agenerate_for_category`."""
+        return asyncio.run(self.agenerate_for_category(category, count, existing_queries))
 
-        # Build the prompt
+    async def agenerate_for_category(
+        self,
+        category: AdversarialCategory,
+        count: int = 10,
+        existing_queries: list[str] | None = None,
+    ) -> list[Query]:
+        """Generate adversarial queries for a category."""
+        metadata = get_category_metadata(category)
         example_queries = "\n".join(f"- {q}" for q in metadata.example_queries)
         if existing_queries:
             example_queries += "\n\nAlready generated (DO NOT repeat):\n"
@@ -114,48 +201,32 @@ class QueryGenerator:
             example_queries=example_queries,
             count=count,
         )
-
-        # Call the LLM
-        response = self.client.messages.create(
+        result = await structured_call(
+            self.client,
             model=self.model,
-            max_tokens=4096,
-            temperature=self.temperature,
-            messages=[{"role": "user", "content": prompt}],
+            system=GENERATION_SYSTEM,
+            prompt=prompt,
+            schema=GENERATION_SCHEMA,
+            effort=self.effort,
         )
-
-        # Parse response
-        content = response.content[0].text
-
-        try:
-            from searchprobe.utils.parsing import extract_json_from_llm_response
-
-            data = extract_json_from_llm_response(content)
-        except ValueError as e:
-            print(f"Failed to parse LLM response: {e}")
-            print(f"Content: {content[:500]}")
-            return []
-
-        # Convert to Query objects
+        seen = {q.lower().strip() for q in (existing_queries or [])}
         queries = []
-        for item in data.get("queries", []):
-            ground_truth = None
-            if "ground_truth_hints" in item:
-                ground_truth = GroundTruth(
-                    strategy="manual", manual_judgment=item["ground_truth_hints"]
-                )
-
+        for item in result.data.get("queries", []):
+            text = item["text"].strip()
+            if not text or text.lower() in seen:
+                continue
+            seen.add(text.lower())
             queries.append(
                 Query(
-                    text=item["text"],
+                    text=text,
                     category=category,
                     difficulty=item.get("difficulty", "medium"),
                     tier="llm",
-                    ground_truth=ground_truth,
+                    ground_truth=_ground_truth_from_item(item),
                     adversarial_reason=item.get("adversarial_reason"),
-                    metadata={"model": self.model},
+                    metadata={"model": result.model},
                 )
             )
-
         return queries
 
     def _get_detailed_explanation(self, metadata: CategoryMetadata) -> str:
@@ -262,7 +333,7 @@ class QueryGenerator:
 
         for category in AdversarialCategory:
             print(f"Generating {count_per_category} queries for {category.value}...")
-            queries = self.generate_for_category(category, count_per_category)
+            queries = await self.agenerate_for_category(category, count_per_category)
             all_queries.extend(queries)
             print(f"  Generated {len(queries)} queries")
 

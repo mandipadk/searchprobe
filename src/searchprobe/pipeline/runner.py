@@ -7,7 +7,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from searchprobe.config import Settings, get_settings
-from searchprobe.core.exceptions import BudgetExhaustedError, PipelineError
+from searchprobe.core.exceptions import PipelineError
 from searchprobe.pipeline.cost_tracker import CostTracker
 from searchprobe.pipeline.rate_limiter import RateLimiterPool
 from searchprobe.providers.models import SearchRequest, SearchResponse
@@ -53,6 +53,9 @@ class BenchmarkResult:
     total_cost: float
     cost_by_provider: dict[str, float]
     results: list[SearchResponse]
+    empty_queries: int = 0
+    skipped_for_budget: int = 0
+    status: str = "completed"  # completed | partial (budget exhausted)
 
 
 class BenchmarkRunner:
@@ -101,10 +104,13 @@ class BenchmarkRunner:
         self._progress_callback = callback
 
     def _get_provider(self, name: str) -> ResilientProvider:
-        """Get or create a resilient provider instance."""
+        """Get or create a resilient, rate-limited provider instance."""
         if name not in self._providers:
             raw_provider = ProviderRegistry.get_provider(name, self.settings)
-            self._providers[name] = ResilientProvider(raw_provider)
+            self._providers[name] = ResilientProvider(
+                raw_provider,
+                before_attempt=lambda n=name: self.rate_limiters.acquire(n),
+            )
         return self._providers[name]
 
     async def run(
@@ -142,91 +148,72 @@ class BenchmarkRunner:
         tasks = self._build_tasks(queries)
         total_tasks = len(tasks)
 
-        # Execute tasks with concurrency control
         semaphore = asyncio.Semaphore(self.config.max_concurrent)
         results: list[SearchResponse] = []
         completed = 0
+        skipped_for_budget = 0
 
         async def execute_task(task: QueryTask) -> SearchResponse | None:
-            nonlocal completed
-
-            # Check budget
-            if self.cost_tracker.is_budget_exceeded():
-                raise BudgetExhaustedError(
-                    f"Budget ${self.config.budget_limit:.2f} exceeded "
-                    f"(spent ${self.cost_tracker.get_total():.4f})",
-                    spent=self.cost_tracker.get_total(),
-                    limit=self.config.budget_limit,
-                )
-
-            # Rate limit
-            await self.rate_limiters.acquire(task.provider_name)
-
-            # Execute search
+            nonlocal completed, skipped_for_budget
             async with semaphore:
-                response = await self._execute_search(task)
-
-                # Track cost
-                if response.cost_usd > 0:
-                    self.cost_tracker.record(
+                request = self._build_request(task)
+                provider = self._get_provider(task.provider_name)
+                # Reserve the estimated cost *before* dispatch so concurrent tasks
+                # cannot collectively overspend the budget.
+                reservation = self.cost_tracker.try_reserve(provider.estimate_cost(request))
+                if reservation is None:
+                    skipped_for_budget += 1
+                    return None
+                try:
+                    response = await provider.search(request)
+                except Exception as e:  # never lose a task silently
+                    response = SearchResponse(
                         provider=task.provider_name,
-                        operation=f"search_{task.search_mode or 'default'}",
-                        cost_usd=response.cost_usd,
-                        metadata={"query_id": task.query_id},
+                        search_mode=task.search_mode,
+                        query=task.query_text,
+                        error=f"{type(e).__name__}: {e}",
                     )
+                self.cost_tracker.commit(
+                    reservation,
+                    provider=task.provider_name,
+                    operation=f"search_{task.search_mode or 'default'}",
+                    cost_usd=response.cost_usd,
+                    metadata={"query_id": task.query_id},
+                )
+                # Store every response, including empty result sets: an empty
+                # list is a retrieval failure, not a missing data point.
+                self.db.add_search_result(run_id, task.query_id, response)
 
-                # Store result
-                if response.success or response.error:
-                    self.db.add_search_result(run_id, task.query_id, response)
-
-                # Update progress
                 completed += 1
                 if self._progress_callback:
                     self._progress_callback(
-                        f"Searching: {task.query_text[:50]}...",
-                        completed,
-                        total_tasks,
+                        f"Searching: {task.query_text[:50]}...", completed, total_tasks
                     )
-
                 return response
 
-        # Run all tasks
-        task_results = await asyncio.gather(
-            *[execute_task(t) for t in tasks], return_exceptions=True
-        )
+        task_results = await asyncio.gather(*[execute_task(t) for t in tasks])
+        results = [r for r in task_results if r is not None]
+        status = "partial" if skipped_for_budget else "completed"
 
-        # Collect valid results
-        for result in task_results:
-            if isinstance(result, SearchResponse):
-                results.append(result)
-            elif isinstance(result, BudgetExhaustedError):
-                raise result
-            elif isinstance(result, Exception):
-                # Log error but continue
-                pass
-
-        # Complete run
         completed_at = datetime.now(UTC)
         self.db.complete_run(
             run_id,
             self.cost_tracker.get_total(),
             self.cost_tracker.get_total_by_provider(),
+            status=status,
         )
-
-        # Clean up providers
         await self._cleanup_providers()
-
-        # Calculate stats
-        successful = len([r for r in results if r.success])
-        failed = len([r for r in results if r.error])
 
         return BenchmarkResult(
             run_id=run_id,
             started_at=started_at,
             completed_at=completed_at,
             total_queries=len(tasks),
-            successful_queries=successful,
-            failed_queries=failed,
+            successful_queries=len([r for r in results if r.success]),
+            failed_queries=len([r for r in results if r.error]),
+            empty_queries=len([r for r in results if not r.error and not r.results]),
+            skipped_for_budget=skipped_for_budget,
+            status=status,
             total_cost=self.cost_tracker.get_total(),
             cost_by_provider=self.cost_tracker.get_total_by_provider(),
             results=results,
@@ -272,19 +259,15 @@ class BenchmarkRunner:
                 pass
         self._providers.clear()
 
-    async def _execute_search(self, task: QueryTask) -> SearchResponse:
-        """Execute a single search task."""
-        provider = self._get_provider(task.provider_name)
-
-        request = SearchRequest(
+    def _build_request(self, task: QueryTask) -> SearchRequest:
+        """Build the provider request for a task."""
+        return SearchRequest(
             query=task.query_text,
             num_results=self.config.num_results,
             include_content=self.config.include_content,
             max_content_chars=self.config.max_content_chars,
             search_mode=task.search_mode,
         )
-
-        return await provider.search(request)
 
 
 async def run_benchmark(

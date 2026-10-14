@@ -3,9 +3,12 @@
 import pandas as pd
 import streamlit as st
 
+from searchprobe.core.systems import system_key_of
 from searchprobe.evaluation.statistics import (
     aggregate_by_category,
+    align_paired,
     compare_providers,
+    quality_evaluations,
 )
 from searchprobe.reporting.charts import create_heatmap, create_radar_chart
 from searchprobe.storage import Database
@@ -22,9 +25,7 @@ def render(db: Database, run_id: str) -> None:
         return
 
     # Get unique providers
-    providers = list(
-        {f"{e.get('provider', 'unknown')}:{e.get('search_mode', 'default')}" for e in evaluations}
-    )
+    providers = sorted({system_key_of(e) for e in evaluations})
 
     if len(providers) < 2:
         st.info("Need at least 2 providers for comparison.")
@@ -46,27 +47,25 @@ def render(db: Database, run_id: str) -> None:
             "category": e.get("category"),
             "provider": e.get("provider"),
             "search_mode": e.get("search_mode"),
+            "status": e.get("status") or "ok",
+            "query_id": e.get("query_id"),
             "weighted_score": e.get("weighted_score", 0),
         }
-        for e in evaluations
+        for e in quality_evaluations(evaluations)
     ]
 
     # Head-to-head comparison
     st.subheader("Head-to-Head Comparison")
 
-    scores_a = [
-        e["weighted_score"]
-        for e in eval_data
-        if f"{e['provider']}:{e.get('search_mode', 'default')}" == provider_a
-    ]
-    scores_b = [
-        e["weighted_score"]
-        for e in eval_data
-        if f"{e['provider']}:{e.get('search_mode', 'default')}" == provider_b
-    ]
+    # Pair by query: both systems ran the same queries.
+    scores_a, scores_b, _ = align_paired(eval_data, provider_a, provider_b)
 
     if scores_a and scores_b:
-        comparison = compare_providers(provider_a, scores_a, provider_b, scores_b, paired=False)
+        comparison = compare_providers(provider_a, scores_a, provider_b, scores_b, paired=True)
+        st.caption(
+            f"Paired over {len(scores_a)} shared queries. 95% CI of difference: "
+            f"[{comparison.ci.lower:+.3f}, {comparison.ci.upper:+.3f}]"
+        )
 
         col1, col2, col3 = st.columns(3)
 

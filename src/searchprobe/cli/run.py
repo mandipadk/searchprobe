@@ -8,6 +8,7 @@ from rich.progress import BarColumn, Progress, SpinnerColumn, TaskProgressColumn
 from rich.table import Table
 
 from searchprobe.config import get_settings
+from searchprobe.core.systems import system_key_of
 from searchprobe.pipeline.runner import BenchmarkConfig, BenchmarkRunner
 from searchprobe.providers.registry import ProviderRegistry
 from searchprobe.storage import Database
@@ -234,7 +235,7 @@ def _display_results(results) -> None:
     # Group by provider for summary
     by_provider: dict[str, list] = {}
     for r in results:
-        provider_key = f"{r.provider}:{r.search_mode or 'default'}"
+        provider_key = system_key_of(r)
         if provider_key not in by_provider:
             by_provider[provider_key] = []
         by_provider[provider_key].append(r)
@@ -278,8 +279,6 @@ def _display_results(results) -> None:
 
     for r in sample_results:
         status = "[green]OK[/green]" if r.success else f"[red]ERR: {r.error}[/red]"
-        console.print(
-            f"  [{r.provider}:{r.search_mode or 'default'}] {r.query[:50]}... -> {status}"
-        )
+        console.print(f"  [{system_key_of(r)}] {r.query[:50]}... -> {status}")
         if r.results:
             console.print(f"    Top: {r.results[0].title[:60]}...")

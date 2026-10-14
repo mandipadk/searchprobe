@@ -4,6 +4,7 @@ import json
 
 import streamlit as st
 
+from searchprobe.core.systems import system_key_of
 from searchprobe.storage import Database
 
 
@@ -28,12 +29,7 @@ def render(db: Database, run_id: str) -> None:
         )
 
     with col2:
-        providers = sorted(
-            {
-                f"{e.get('provider', 'unknown')}:{e.get('search_mode', 'default')}"
-                for e in evaluations
-            }
-        )
+        providers = sorted({system_key_of(e) for e in evaluations})
         selected_provider = st.selectbox(
             "Provider",
             ["All"] + providers,
@@ -52,11 +48,7 @@ def render(db: Database, run_id: str) -> None:
         filtered_evals = [e for e in filtered_evals if e.get("category") == selected_category]
 
     if selected_provider != "All":
-        filtered_evals = [
-            e
-            for e in filtered_evals
-            if f"{e.get('provider')}:{e.get('search_mode', 'default')}" == selected_provider
-        ]
+        filtered_evals = [e for e in filtered_evals if system_key_of(e) == selected_provider]
 
     if score_filter == "Low (< 0.5)":
         filtered_evals = [e for e in filtered_evals if e.get("weighted_score", 0) < 0.5]
@@ -74,9 +66,7 @@ def render(db: Database, run_id: str) -> None:
         color = "green" if score > 0.75 else "orange" if score > 0.5 else "red"
 
         with st.expander(
-            f"[{e.get('provider')}:{e.get('search_mode', 'default')}] "
-            f"{e.get('query_text', '')[:60]}... "
-            f"(Score: :{color}[{score:.2f}])"
+            f"[{system_key_of(e)}] {e.get('query_text', '')[:60]}... (Score: :{color}[{score:.2f}])"
         ):
             col1, col2 = st.columns([2, 1])
 

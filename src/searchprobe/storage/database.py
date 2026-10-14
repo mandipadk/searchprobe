@@ -9,7 +9,11 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
+from searchprobe.core.systems import system_key
 from searchprobe.providers.models import SearchResponse
+
+# Evaluation statuses that reflect infrastructure, not retrieval quality.
+INFRA_ERROR_STATUSES = frozenset({"search_error", "judge_error"})
 
 
 class Database:
@@ -74,6 +78,9 @@ class Database:
         run_id TEXT REFERENCES runs(id),
         query_id TEXT REFERENCES queries(id),
         provider TEXT NOT NULL,
+        search_mode TEXT,
+        status TEXT DEFAULT 'ok',  -- ok | no_results | search_error | judge_error
+        prompt_version TEXT,
         result_index INTEGER,  -- which result in the list
         scores TEXT NOT NULL,  -- JSON {dimension: score}
         weighted_score REAL,
@@ -172,6 +179,18 @@ class Database:
     CREATE INDEX IF NOT EXISTS idx_evolution_timestamp ON evolution_results(timestamp);
     """
 
+    # Columns added after the first release; applied to existing databases on open.
+    MIGRATIONS: dict[str, dict[str, str]] = {
+        "geometry_results": {"run_id": "TEXT REFERENCES runs(id)"},
+        "runs": {"status": "TEXT"},
+        "search_results": {"metadata": "TEXT"},
+        "evaluations": {
+            "search_mode": "TEXT",
+            "status": "TEXT DEFAULT 'ok'",
+            "prompt_version": "TEXT",
+        },
+    }
+
     def __init__(self, db_path: str | Path = "searchprobe.db") -> None:
         """Initialize database connection."""
         self.db_path = Path(db_path)
@@ -182,14 +201,11 @@ class Database:
         with self._get_connection() as conn:
             conn.execute("PRAGMA journal_mode=WAL")
             conn.executescript(self.SCHEMA)
-            # Migrate: add run_id to geometry_results if missing
-            cols = [
-                row[1] for row in conn.execute("PRAGMA table_info(geometry_results)").fetchall()
-            ]
-            if "run_id" not in cols:
-                conn.execute(
-                    "ALTER TABLE geometry_results ADD COLUMN run_id TEXT REFERENCES runs(id)"
-                )
+            for table, columns in self.MIGRATIONS.items():
+                existing = {row[1] for row in conn.execute(f"PRAGMA table_info({table})")}
+                for column, decl in columns.items():
+                    if column not in existing:
+                        conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {decl}")
             conn.commit()
 
     @contextmanager
@@ -316,15 +332,25 @@ class Database:
         return run_id
 
     def complete_run(
-        self, run_id: str, cost_total: float, cost_breakdown: dict[str, float]
+        self,
+        run_id: str,
+        cost_total: float,
+        cost_breakdown: dict[str, float],
+        status: str = "completed",
     ) -> None:
-        """Mark a run as completed with cost information."""
+        """Mark a run as finished with cost information and a status."""
         with self._get_connection() as conn:
             conn.execute(
                 """UPDATE runs
-                   SET completed_at = ?, cost_total = ?, cost_breakdown = ?
+                   SET completed_at = ?, cost_total = ?, cost_breakdown = ?, status = ?
                    WHERE id = ?""",
-                (datetime.now(UTC).isoformat(), cost_total, json.dumps(cost_breakdown), run_id),
+                (
+                    datetime.now(UTC).isoformat(),
+                    cost_total,
+                    json.dumps(cost_breakdown),
+                    status,
+                    run_id,
+                ),
             )
             conn.commit()
 
@@ -342,8 +368,8 @@ class Database:
             conn.execute(
                 """INSERT INTO search_results
                    (id, run_id, query_id, provider, search_mode, results,
-                    latency_ms, cost_usd, error, timestamp)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    latency_ms, cost_usd, error, timestamp, metadata)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     result_id,
                     run_id,
@@ -355,6 +381,7 @@ class Database:
                     response.cost_usd,
                     response.error,
                     response.timestamp.isoformat(),
+                    json.dumps(response.metadata, default=str),
                 ),
             )
             conn.commit()
@@ -422,6 +449,7 @@ class Database:
                     WHERE e.run_id = sr.run_id
                     AND e.query_id = sr.query_id
                     AND e.provider = sr.provider
+                    AND COALESCE(e.search_mode, '') = COALESCE(sr.search_mode, '')
                 )
             """
 
@@ -456,14 +484,18 @@ class Database:
         with self._get_connection() as conn:
             conn.execute(
                 """INSERT INTO evaluations
-                   (id, run_id, query_id, provider, result_index, scores,
-                    weighted_score, reasoning, failure_mode, judge_model, timestamp)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                   (id, run_id, query_id, provider, search_mode, status, prompt_version,
+                    result_index, scores, weighted_score, reasoning, failure_mode,
+                    judge_model, timestamp)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     eval_id,
                     run_id,
                     evaluation.get("query_id"),
                     evaluation.get("provider"),
+                    evaluation.get("search_mode"),
+                    evaluation.get("status", "ok"),
+                    evaluation.get("prompt_version"),
                     evaluation.get("best_result_index"),
                     json.dumps(evaluation.get("dimension_scores", {})),
                     evaluation.get("weighted_score", 0.0),
@@ -520,6 +552,7 @@ class Database:
                     result["scores"] = json.loads(result["scores"])
                 if result.get("failure_mode"):
                     result["failure_modes"] = json.loads(result["failure_mode"])
+                result["system"] = system_key(result.get("provider"), result.get("search_mode"))
                 results.append(result)
             return results
 
@@ -556,8 +589,12 @@ class Database:
         model_name: str | None = None,
         category: str | None = None,
         run_id: str | None = None,
+        latest_only: bool = False,
     ) -> list[dict[str, Any]]:
-        """Get geometry analysis results."""
+        """Get geometry analysis results, newest first.
+
+        With ``latest_only``, keep only the newest row per (model, category).
+        """
         query = "SELECT * FROM geometry_results WHERE 1=1"
         params: list[Any] = []
         if run_id:
@@ -578,6 +615,15 @@ class Database:
                 if r.get("pair_details"):
                     r["pair_details"] = json.loads(r["pair_details"])
                 results.append(r)
+            if latest_only:
+                seen: set[tuple[str, str]] = set()
+                deduped = []
+                for r in results:
+                    key = (r["model_name"], r["category"])
+                    if key not in seen:
+                        seen.add(key)
+                        deduped.append(r)
+                results = deduped
             return results
 
     # Perturbation Operations
@@ -771,18 +817,25 @@ class Database:
         """Compute and store aggregate scores for a run.
 
         Replaces any existing aggregates for this run, then computes
-        per-(provider, category, dimension) statistics from evaluations.
+        per-(system, category, dimension) statistics from evaluations.
+        The ``provider`` column holds the system key (``provider:mode``).
+
+        Infrastructure errors (``search_error``/``judge_error``) are excluded
+        from quality statistics and reported as ``failure_rate`` instead;
+        ``no_results`` is a genuine retrieval failure and counts as 0.
 
         Returns:
             Number of aggregate rows inserted.
         """
+        from collections import defaultdict
+
+        from searchprobe.evaluation.statistics import calculate_confidence_interval
+
         with self._get_connection() as conn:
             conn.execute("DELETE FROM aggregate_scores WHERE run_id = ?", (run_id,))
-
-            # Fetch evaluations with category info
             rows = conn.execute(
-                """SELECT e.provider, q.category, e.scores, e.weighted_score,
-                          e.failure_mode
+                """SELECT e.provider, e.search_mode, e.status, e.query_id, q.category,
+                          e.scores, e.weighted_score
                    FROM evaluations e
                    JOIN queries q ON e.query_id = q.id
                    WHERE e.run_id = ?""",
@@ -793,51 +846,35 @@ class Database:
                 conn.commit()
                 return 0
 
-            # Build aggregation: (provider, category, dimension) -> list of scores
-            import math
-            from collections import defaultdict
-
             buckets: dict[tuple[str, str, str], list[float]] = defaultdict(list)
-            failure_counts: dict[tuple[str, str], tuple[int, int]] = defaultdict(lambda: (0, 0))
+            totals: dict[tuple[str, str], int] = defaultdict(int)
+            errors: dict[tuple[str, str], int] = defaultdict(int)
 
             for row in rows:
-                provider = row["provider"]
+                system = system_key(row["provider"], row["search_mode"])
                 category = row["category"]
-                scores_json = row["scores"]
-                failure_json = row["failure_mode"]
+                status = row["status"] or "ok"
+                totals[(system, category)] += 1
+                if status in INFRA_ERROR_STATUSES:
+                    errors[(system, category)] += 1
+                    continue
 
-                # Track overall weighted score under dimension="overall"
-                buckets[(provider, category, "overall")].append(row["weighted_score"] or 0.0)
-
-                # Track per-dimension scores
-                if scores_json:
-                    dim_scores = json.loads(scores_json)
-                    for dim_name, dim_data in dim_scores.items():
+                buckets[(system, category, "overall")].append(row["weighted_score"] or 0.0)
+                if row["scores"]:
+                    for dim_name, dim_data in json.loads(row["scores"]).items():
                         score = (
                             dim_data.get("score", 0.0) if isinstance(dim_data, dict) else dim_data
                         )
-                        buckets[(provider, category, dim_name)].append(float(score))
+                        buckets[(system, category, dim_name)].append(float(score))
 
-                # Track failures
-                key = (provider, category)
-                total, fails = failure_counts[key]
-                has_failure = bool(failure_json and failure_json != "[]")
-                failure_counts[key] = (total + 1, fails + (1 if has_failure else 0))
-
-            # Insert aggregated rows
             count = 0
-            for (provider, category, dimension), scores in buckets.items():
+            for (system, category, dimension), scores in buckets.items():
+                ci = calculate_confidence_interval(scores)
                 n = len(scores)
-                mean = sum(scores) / n
-                variance = sum((s - mean) ** 2 for s in scores) / n if n > 1 else 0.0
-                std = math.sqrt(variance)
-                se = std / math.sqrt(n) if n > 1 else 0.0
-                ci_lower = mean - 1.96 * se
-                ci_upper = mean + 1.96 * se
-
-                total, fails = failure_counts.get((provider, category), (0, 0))
-                failure_rate = fails / total if total > 0 else 0.0
-
+                mean = ci.mean
+                std = (sum((x - mean) ** 2 for x in scores) / (n - 1)) ** 0.5 if n > 1 else 0.0
+                total = totals[(system, category)]
+                failure_rate = errors[(system, category)] / total if total else 0.0
                 conn.execute(
                     """INSERT INTO aggregate_scores
                        (run_id, provider, category, dimension, mean_score,
@@ -845,13 +882,13 @@ class Database:
                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                     (
                         run_id,
-                        provider,
+                        system,
                         category,
                         dimension,
                         mean,
                         std,
-                        ci_lower,
-                        ci_upper,
+                        ci.lower,
+                        ci.upper,
                         n,
                         failure_rate,
                     ),

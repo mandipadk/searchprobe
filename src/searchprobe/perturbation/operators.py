@@ -41,7 +41,7 @@ SIMPLE_SYNONYMS: dict[str, list[str]] = {
 }
 
 
-def word_delete(query: str, max_variants: int = 5) -> list[tuple[str, str]]:
+def word_delete(query: str, max_variants: int | None = None, **_: object) -> list[tuple[str, str]]:
     """Generate variants by deleting one word at a time.
 
     Args:
@@ -60,13 +60,15 @@ def word_delete(query: str, max_variants: int = 5) -> list[tuple[str, str]]:
         new_words = words[:i] + words[i + 1 :]
         perturbed = " ".join(new_words)
         variants.append((perturbed, f"deleted '{word}' at position {i}"))
-        if len(variants) >= max_variants:
+        if max_variants is not None and len(variants) >= max_variants:
             break
 
     return variants
 
 
-def word_swap(query: str, max_variants: int = 5) -> list[tuple[str, str]]:
+def word_swap(
+    query: str, max_variants: int = 5, rng: random.Random | None = None, **_: object
+) -> list[tuple[str, str]]:
     """Generate variants by swapping adjacent words.
 
     Args:
@@ -82,7 +84,7 @@ def word_swap(query: str, max_variants: int = 5) -> list[tuple[str, str]]:
 
     variants = []
     indices = list(range(len(words) - 1))
-    random.shuffle(indices)
+    (rng or random.Random(0)).shuffle(indices)
 
     for i in indices[:max_variants]:
         new_words = words.copy()
@@ -94,7 +96,7 @@ def word_swap(query: str, max_variants: int = 5) -> list[tuple[str, str]]:
     return variants
 
 
-def negation_insert(query: str, max_variants: int = 3) -> list[tuple[str, str]]:
+def negation_insert(query: str, max_variants: int = 3, **_: object) -> list[tuple[str, str]]:
     """Generate variants by inserting negation words.
 
     Args:
@@ -137,7 +139,7 @@ def negation_remove(query: str, **kwargs: object) -> list[tuple[str, str]]:
     return variants
 
 
-def synonym_replace(query: str, max_variants: int = 5) -> list[tuple[str, str]]:
+def synonym_replace(query: str, max_variants: int = 5, **_: object) -> list[tuple[str, str]]:
     """Generate variants by replacing words with synonyms.
 
     Uses NLTK WordNet when available, falls back to a simple synonym map.
@@ -153,6 +155,10 @@ def synonym_replace(query: str, max_variants: int = 5) -> list[tuple[str, str]]:
     variants = []
 
     for i, word in enumerate(words):
+        # Skip acronyms/proper nouns and very short words: WordNet senses for
+        # them are usually wrong (e.g. "AI" -> the three-toed sloth).
+        if len(word) < 4 or not word.islower():
+            continue
         synonyms = _get_synonyms(word.lower())
         if synonyms:
             syn = synonyms[0]
@@ -189,7 +195,7 @@ def _get_synonyms(word: str) -> list[str]:
                 if name.lower() != word.lower():
                     synonyms.add(name)
         if synonyms:
-            return list(synonyms)[:5]
+            return sorted(synonyms)[:5]  # deterministic order
     except (ImportError, LookupError):
         pass
 
@@ -211,6 +217,7 @@ def apply_perturbation(
     query: str,
     perturbation_type: PerturbationType,
     max_variants: int = 5,
+    rng: random.Random | None = None,
 ) -> list[tuple[str, str]]:
     """Apply a perturbation operator to a query.
 
@@ -223,4 +230,7 @@ def apply_perturbation(
         List of (perturbed_query, detail) tuples
     """
     operator = OPERATORS[perturbation_type]
-    return operator(query, max_variants=max_variants)
+    if perturbation_type == PerturbationType.WORD_DELETE:
+        # Every word must be deleted once or the sensitivity map is incomplete.
+        return operator(query, max_variants=None, rng=rng)
+    return operator(query, max_variants=max_variants, rng=rng)

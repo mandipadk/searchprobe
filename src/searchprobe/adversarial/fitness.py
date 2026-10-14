@@ -1,5 +1,6 @@
 """Fitness evaluation for adversarial query individuals."""
 
+import asyncio
 from typing import Any
 
 from searchprobe.adversarial.models import Individual
@@ -20,6 +21,9 @@ class FitnessEvaluator:
         provider: Any | None = None,
         judge: Any | None = None,
         cross_encoder: Any | None = None,
+        search_mode: str | None = None,
+        cost_tracker: Any | None = None,
+        max_concurrent: int = 5,
     ) -> None:
         """Initialize the fitness evaluator.
 
@@ -33,6 +37,12 @@ class FitnessEvaluator:
         self.provider = provider
         self.judge = judge
         self.cross_encoder = cross_encoder
+        self.search_mode = search_mode
+        self.cost_tracker = cost_tracker
+        self.max_concurrent = max_concurrent
+        self.total_cost = 0.0
+        self.budget_exhausted = False
+        self._cache: dict[str, float] = {}
         self._embedding_model: Any = None
 
     async def evaluate(self, individual: Individual) -> float:
@@ -50,21 +60,60 @@ class FitnessEvaluator:
             return await self._evaluate_llm_judge(individual)
         elif self.mode == "cross_encoder":
             return await self._evaluate_cross_encoder(individual)
-        else:
+        elif self.mode in ("heuristic", "embedding_sim"):
             return self._evaluate_embedding_sim(individual)
+        raise ValueError(f"Unknown fitness mode: {self.mode}")
 
     async def evaluate_population(self, individuals: list[Individual]) -> list[Individual]:
-        """Evaluate fitness for an entire population.
+        """Evaluate fitness for a population concurrently, with caching.
 
-        Args:
-            individuals: List of individuals to evaluate
-
-        Returns:
-            Same individuals with fitness scores updated
+        Identical queries (case/whitespace-normalized) are evaluated once. When
+        a cost tracker is attached, live evaluations reserve budget first; once
+        the budget is exhausted, remaining individuals get fitness 0.0 and
+        ``budget_exhausted`` is set.
         """
-        for individual in individuals:
-            individual.fitness = await self.evaluate(individual)
+        semaphore = asyncio.Semaphore(self.max_concurrent)
+
+        async def _one(ind: Individual) -> None:
+            key = " ".join(ind.query.lower().split())
+            if key in self._cache:
+                ind.fitness = self._cache[key]
+                return
+            async with semaphore:
+                reservation = None
+                live = self.mode in ("llm_judge", "cross_encoder") and self.provider is not None
+                if live and self.cost_tracker is not None:
+                    reservation = self.cost_tracker.try_reserve(self._estimate_cost())
+                    if reservation is None:
+                        self.budget_exhausted = True
+                        ind.fitness = 0.0
+                        return
+                fitness, cost = await self._evaluate_with_cost(ind)
+                if self.cost_tracker is not None:
+                    self.cost_tracker.commit(reservation, "evolution", self.mode, cost)
+                self.total_cost += cost
+            ind.fitness = fitness
+            self._cache[key] = fitness
+
+        await asyncio.gather(*[_one(ind) for ind in individuals])
         return individuals
+
+    def _estimate_cost(self) -> float:
+        cost = 0.0
+        if self.provider is not None and hasattr(self.provider, "estimate_cost"):
+            from searchprobe.providers.models import SearchRequest
+
+            cost += self.provider.estimate_cost(
+                SearchRequest(query="x", num_results=5, search_mode=self.search_mode)
+            )
+        if self.mode == "llm_judge":
+            cost += 0.02  # conservative per-judgment estimate
+        return cost
+
+    async def _evaluate_with_cost(self, individual: Individual) -> tuple[float, float]:
+        self._last_cost = 0.0
+        fitness = await self.evaluate(individual)
+        return fitness, self._last_cost
 
     async def _evaluate_llm_judge(self, individual: Individual) -> float:
         """Evaluate using LLM judge — most accurate but expensive."""
@@ -78,11 +127,13 @@ class FitnessEvaluator:
                 query=individual.query,
                 num_results=5,
                 include_content=True,
+                search_mode=self.search_mode,
             )
             response = await self.provider.search(request)
+            self._last_cost = getattr(self, "_last_cost", 0.0) + response.cost_usd
 
-            if not response.success:
-                return 0.8  # Search failure = high adversarial fitness
+            if response.error:
+                return 0.0  # infrastructure failure is not an adversarial success
 
             evaluation = await self.judge.evaluate(
                 query_id=individual.id,
@@ -91,11 +142,14 @@ class FitnessEvaluator:
                 search_response=response,
             )
 
+            self._last_cost += getattr(evaluation, "cost_usd", 0.0)
+            if not evaluation.counts_for_quality:
+                return 0.0
             # Fitness = 1 - score (lower relevance = higher adversarial fitness)
             return 1.0 - evaluation.weighted_score
 
         except Exception:
-            return 0.5
+            return 0.0  # evaluation error: not evidence of an adversarial query
 
     async def _evaluate_cross_encoder(self, individual: Individual) -> float:
         """Evaluate using cross-encoder gap."""
@@ -109,11 +163,13 @@ class FitnessEvaluator:
                 query=individual.query,
                 num_results=5,
                 include_content=True,
+                search_mode=self.search_mode,
             )
             response = await self.provider.search(request)
+            self._last_cost = getattr(self, "_last_cost", 0.0) + response.cost_usd
 
-            if not response.success:
-                return 0.8
+            if response.error:
+                return 0.0
 
             results_dicts = [
                 {
@@ -137,10 +193,15 @@ class FitnessEvaluator:
             return min(1.0, validation.ndcg_improvement * 2)
 
         except Exception:
-            return 0.5
+            return 0.0  # evaluation error: not evidence of an adversarial query
 
     def _evaluate_embedding_sim(self, individual: Individual) -> float:
-        """Evaluate using embedding similarity heuristics — cheapest.
+        """Structural heuristic ("heuristic"/legacy "embedding_sim" mode).
+
+        WARNING: this never queries a search engine. It scores query *shape*
+        (negations, digits, length), so evolving against it produces long,
+        operator-stuffed queries regardless of how any engine behaves. Use it
+        only for offline smoke tests.
 
         Uses structural features of the query to estimate adversarial potential.
         """

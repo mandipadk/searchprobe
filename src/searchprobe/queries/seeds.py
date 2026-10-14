@@ -98,7 +98,13 @@ def get_builtin_seeds() -> list[Query]:
             ground_truth=GroundTruth(
                 strategy="must_not_contain",
                 must_not_contain_keywords=["Java", "C++", "Python", "Ruby", "C#"],
-                must_contain_keywords=["Haskell", "Erlang", "C", "Rust", "Go", "functional"],
+                must_contain_keywords=[
+                    "Haskell",
+                    "Erlang",
+                    "Elixir",
+                    "Lisp",
+                    "functional programming",
+                ],
             ),
             adversarial_reason="'NOT object-oriented' should exclude OOP languages",
         ),
@@ -278,7 +284,7 @@ def get_builtin_seeds() -> list[Query]:
             ground_truth=GroundTruth(
                 strategy="must_not_contain",
                 must_contain_keywords=["PyTorch"],
-                must_not_contain_keywords=["TensorFlow", "tf."],
+                must_not_contain_keywords=["TensorFlow"],
             ),
             adversarial_reason="Boolean NOT is lost in embedding averaging",
         ),

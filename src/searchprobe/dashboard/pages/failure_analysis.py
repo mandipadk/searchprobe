@@ -3,6 +3,7 @@
 import pandas as pd
 import streamlit as st
 
+from searchprobe.core.systems import system_key_of
 from searchprobe.evaluation.statistics import failure_mode_frequency
 from searchprobe.reporting.charts import create_failure_mode_chart
 from searchprobe.storage import Database
@@ -25,7 +26,7 @@ def render(db: Database, run_id: str) -> None:
             all_failures.append(
                 {
                     "mode": mode,
-                    "provider": f"{e.get('provider')}:{e.get('search_mode', 'default')}",
+                    "provider": system_key_of(e),
                     "category": e.get("category"),
                     "query": e.get("query_text"),
                     "score": e.get("weighted_score", 0),

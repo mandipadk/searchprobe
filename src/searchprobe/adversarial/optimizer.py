@@ -55,16 +55,17 @@ class AdversarialQueryOptimizer:
         self.fitness = fitness_evaluator
         self.context = context
         self.bandit = OperatorBandit(list(MUTATION_OPERATORS.keys()))
+        self.rng = random.Random(config.seed)
 
     def _initialize_population(self) -> Population:
         """Create initial population from seed queries."""
         individuals = []
 
-        for query in self.config.seed_queries:
-            category = ""
-            if self.config.target_categories:
-                category = random.choice(self.config.target_categories)
-
+        seed_cats = self.config.seed_categories or [""] * len(self.config.seed_queries)
+        for query, category in zip(self.config.seed_queries, seed_cats):
+            # Seeds keep their true category; filter rather than relabel.
+            if self.config.target_categories and category not in self.config.target_categories:
+                continue
             individuals.append(
                 Individual(
                     query=query,
@@ -76,7 +77,7 @@ class AdversarialQueryOptimizer:
         # If not enough seeds, generate variants
         while len(individuals) < self.config.population_size:
             if individuals:
-                parent = random.choice(individuals)
+                parent = self.rng.choice(individuals)
                 child = apply_random_mutation(parent)
                 child.generation = 0
                 individuals.append(child)
@@ -104,7 +105,7 @@ class AdversarialQueryOptimizer:
         Returns:
             Selected individual
         """
-        candidates = random.sample(
+        candidates = self.rng.sample(
             population.individuals,
             min(self.config.tournament_size, len(population.individuals)),
         )
@@ -125,11 +126,12 @@ class AdversarialQueryOptimizer:
         target_size = self.config.population_size - self.config.elitism_count
 
         while len(offspring) < target_size:
-            if random.random() < self.config.crossover_rate and len(population.individuals) >= 2:
+            if self.rng.random() < self.config.crossover_rate and len(population.individuals) >= 2:
                 # Crossover
                 parent_a = self._tournament_select(population)
                 parent_b = self._tournament_select(population)
                 child = apply_random_crossover(parent_a, parent_b)
+                parent_fitness = (parent_a.fitness + parent_b.fitness) / 2
             else:
                 # Selection + mutation
                 parent = self._tournament_select(population)
@@ -140,16 +142,16 @@ class AdversarialQueryOptimizer:
                     parent_ids=[parent.id],
                     mutation_history=parent.mutation_history.copy(),
                 )
+                parent_fitness = parent.fitness
 
             # Apply mutation with bandit-selected operator
-            if random.random() < self.config.mutation_rate:
+            if self.rng.random() < self.config.mutation_rate:
                 operator_name = self.bandit.select()
                 operator_fn = MUTATION_OPERATORS[operator_name]
-                old_fitness = child.fitness
                 child = operator_fn(child)
-                # Store operator name for later reward update
+                # Reward = improvement over the parent(s), not over a fresh child (0.0)
                 child.metadata["_pending_operator"] = operator_name
-                child.metadata["_pre_mutation_fitness"] = old_fitness
+                child.metadata["_pre_mutation_fitness"] = parent_fitness
 
             child.generation = population.generation + 1
             offspring.append(child)
@@ -240,7 +242,7 @@ class AdversarialQueryOptimizer:
             best_individuals=best,
             generations_completed=self.config.generations,
             total_evaluations=total_evaluations,
-            total_cost=0.0,  # Would be tracked by CostTracker in live mode
+            total_cost=getattr(self.fitness, "total_cost", 0.0),
             fitness_history=fitness_history,
             started_at=started_at,
             completed_at=datetime.now(UTC),

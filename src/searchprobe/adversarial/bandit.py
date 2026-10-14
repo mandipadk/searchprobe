@@ -26,33 +26,35 @@ class OperatorBandit:
         self.operators = operators
         self.rewards: dict[str, list[float]] = defaultdict(list)
         self.counts: dict[str, int] = defaultdict(int)
+        self.pending: dict[str, int] = defaultdict(int)  # selected, reward not yet known
         self.total_count = 0
 
     def select(self) -> str:
         """Select an operator using UCB1.
 
-        Returns the operator with the highest upper confidence bound.
-        Operators that haven't been tried yet are selected first.
+        Untried operators are selected first. Selections whose reward is still
+        pending count as plays, so a batch of selections made within one
+        generation spreads across operators instead of returning the same
+        untried operator for every offspring.
         """
-        # Ensure every operator is tried at least once
-        for op in self.operators:
-            if self.counts[op] == 0:
-                return op
+        plays = {op: self.counts[op] + self.pending[op] for op in self.operators}
 
-        # UCB1: argmax(mean_reward + sqrt(2 * ln(total) / count))
-        best_op = self.operators[0]
-        best_ucb = float("-inf")
+        untried = [op for op in self.operators if plays[op] == 0]
+        if untried:
+            choice = untried[0]
+        else:
+            total = sum(plays.values())
+            best_ucb = float("-inf")
+            choice = self.operators[0]
+            for op in self.operators:
+                rewards = self.rewards[op]
+                mean_reward = sum(rewards) / len(rewards) if rewards else 0.0
+                ucb = mean_reward + math.sqrt(2 * math.log(total) / plays[op])
+                if ucb > best_ucb:
+                    best_ucb, choice = ucb, op
 
-        for op in self.operators:
-            mean_reward = sum(self.rewards[op]) / len(self.rewards[op])
-            exploration = math.sqrt(2 * math.log(self.total_count) / self.counts[op])
-            ucb = mean_reward + exploration
-
-            if ucb > best_ucb:
-                best_ucb = ucb
-                best_op = op
-
-        return best_op
+        self.pending[choice] += 1
+        return choice
 
     def update(self, operator: str, reward: float) -> None:
         """Record the reward (fitness improvement) for an operator.
@@ -63,6 +65,8 @@ class OperatorBandit:
         """
         self.rewards[operator].append(reward)
         self.counts[operator] += 1
+        if self.pending[operator] > 0:
+            self.pending[operator] -= 1
         self.total_count += 1
 
     def get_stats(self) -> dict[str, dict[str, float]]:

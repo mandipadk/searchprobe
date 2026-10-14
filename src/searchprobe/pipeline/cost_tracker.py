@@ -1,5 +1,13 @@
-"""Cost tracking for API usage."""
+"""Cost tracking and budget enforcement for API usage.
 
+Budget enforcement uses *reservations*: before an operation is dispatched, its
+estimated cost is reserved; the reservation fails if spent + reserved +
+estimate would exceed the budget. This closes the check-then-act race where
+many concurrent tasks all pass a "spent < budget" check before any cost is
+recorded.
+"""
+
+import threading
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
@@ -49,6 +57,52 @@ class CostTracker:
         self.budget_limit = budget_limit
         self.records: list[CostRecord] = []
         self._total_by_provider: dict[str, float] = {}
+        self._reserved: dict[int, float] = {}
+        self._next_reservation = 0
+        self._lock = threading.Lock()
+
+    # -- reservations -----------------------------------------------------
+
+    def try_reserve(self, estimate_usd: float) -> int | None:
+        """Reserve ``estimate_usd`` of budget.
+
+        Returns:
+            A reservation id, or None if the reservation would exceed the budget.
+        """
+        with self._lock:
+            if self.budget_limit is not None:
+                committed = self.get_total() + sum(self._reserved.values())
+                if committed + estimate_usd > self.budget_limit + 1e-12:
+                    return None
+            rid = self._next_reservation
+            self._next_reservation += 1
+            self._reserved[rid] = estimate_usd
+            return rid
+
+    def release(self, reservation: int | None) -> None:
+        """Release a reservation without recording cost (operation not run)."""
+        if reservation is None:
+            return
+        with self._lock:
+            self._reserved.pop(reservation, None)
+
+    def commit(
+        self,
+        reservation: int | None,
+        provider: str,
+        operation: str,
+        cost_usd: float,
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
+        """Replace a reservation with the actual recorded cost."""
+        self.release(reservation)
+        if cost_usd > 0:
+            self.record(provider, operation, cost_usd, metadata)
+
+    @property
+    def reserved_total(self) -> float:
+        with self._lock:
+            return sum(self._reserved.values())
 
     def record(
         self,

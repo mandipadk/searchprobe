@@ -73,9 +73,8 @@ class BraveProvider(SearchProvider):
                 parsed_url = urlparse(url)
                 domain = parsed_url.netloc.replace("www.", "")
 
-                # Brave doesn't provide relevance scores, use position-based
-                # Higher position = higher relevance
-                score = 1.0 - (i / max(len(web_results), 1)) * 0.5  # 1.0 to 0.5 range
+                # Brave returns no relevance score; rank is carried by ``position``.
+                score = None
 
                 # Get content (Brave provides description, not full content)
                 snippet = result.get("description", "")

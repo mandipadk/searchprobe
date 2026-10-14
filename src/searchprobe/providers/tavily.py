@@ -5,7 +5,7 @@ from datetime import UTC, datetime
 from typing import Any, ClassVar
 from urllib.parse import urlparse
 
-from searchprobe.providers.base import SearchProvider
+from searchprobe.providers.base import SearchProvider, looks_rate_limited
 from searchprobe.providers.models import SearchRequest, SearchResponse, SearchResult
 
 
@@ -120,7 +120,7 @@ class TavilyProvider(SearchProvider):
             latency_ms = (time.perf_counter() - start_time) * 1000
             error_msg = str(e)
 
-            if "rate" in error_msg.lower() or "429" in error_msg:
+            if looks_rate_limited(error_msg):
                 raise RateLimitError(error_msg, provider=self.NAME)
 
             return SearchResponse(

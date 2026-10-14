@@ -15,7 +15,7 @@ def render(db: Database, run_id: str) -> None:
     )
 
     # Get validation results
-    validation_results = db.get_validation_results(run_id)
+    validation_results = db.get_validation_results_with_category(run_id)
 
     if not validation_results:
         st.info(

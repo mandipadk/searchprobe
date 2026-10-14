@@ -5,6 +5,7 @@ import streamlit as st
 
 from searchprobe.evaluation.statistics import (
     aggregate_by_category,
+    quality_evaluations,
     summary_statistics,
 )
 from searchprobe.reporting.charts import create_bar_chart, create_radar_chart
@@ -29,6 +30,8 @@ def render(db: Database, run_id: str) -> None:
             "category": e.get("category"),
             "provider": e.get("provider"),
             "search_mode": e.get("search_mode"),
+            "status": e.get("status") or "ok",
+            "query_id": e.get("query_id"),
             "weighted_score": e.get("weighted_score", 0),
             "failure_modes": e.get("failure_modes", []),
         }
@@ -55,7 +58,7 @@ def render(db: Database, run_id: str) -> None:
     # Radar chart
     st.subheader("Provider Performance by Category")
 
-    by_category = aggregate_by_category(eval_data)
+    by_category = aggregate_by_category(quality_evaluations(eval_data))
     chart_data = {}
     for category, providers in by_category.items():
         for provider_key, ci in providers.items():

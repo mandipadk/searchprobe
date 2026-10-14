@@ -18,7 +18,10 @@ def render(db: Database, run_id: str) -> None:
     )
 
     # Get geometry results from database
-    geometry_results = db.get_geometry_results()
+    geometry_results = db.get_geometry_results(run_id=run_id, latest_only=True)
+    if not geometry_results:
+        # Geometry is model-level, not run-level: fall back to the newest rows.
+        geometry_results = db.get_geometry_results(latest_only=True)
 
     if not geometry_results:
         st.info(
@@ -42,7 +45,7 @@ def render(db: Database, run_id: str) -> None:
     for model, results in models.items():
         vulnerability_data[model] = {}
         for r in results:
-            vulnerability_data[model][r["category"]] = r.get("vulnerability_score", 0)
+            vulnerability_data[model][r["category"]] = r.get("vulnerability_score") or 0.0
 
     fig = create_vulnerability_heatmap(vulnerability_data)
     st.plotly_chart(fig, use_container_width=True)

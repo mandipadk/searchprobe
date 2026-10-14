@@ -10,6 +10,7 @@ from jinja2 import Environment, PackageLoader, select_autoescape
 from searchprobe.config import Settings, get_settings
 from searchprobe.evaluation.statistics import (
     aggregate_by_category,
+    quality_evaluations,
     summary_statistics,
 )
 from searchprobe.reporting.charts import (
@@ -83,6 +84,8 @@ class ReportGenerator:
                     "category": e.get("category"),
                     "provider": e.get("provider"),
                     "search_mode": e.get("search_mode"),
+                    "status": e.get("status") or "ok",
+                    "query_id": e.get("query_id"),
                     "weighted_score": e.get("weighted_score", 0),
                     "failure_modes": e.get("failure_modes", []),
                 }
@@ -91,17 +94,7 @@ class ReportGenerator:
         )
 
         # Build provider -> category -> score mapping for charts
-        by_category = aggregate_by_category(
-            [
-                {
-                    "category": e.get("category"),
-                    "provider": e.get("provider"),
-                    "search_mode": e.get("search_mode"),
-                    "weighted_score": e.get("weighted_score", 0),
-                }
-                for e in evaluations
-            ]
-        )
+        by_category = aggregate_by_category(quality_evaluations(evaluations))
 
         chart_data: dict[str, dict[str, float]] = {}
         for category, providers in by_category.items():
@@ -119,10 +112,10 @@ class ReportGenerator:
 
         # --- Geometry data ---
         geometry_data = None
-        geo_results = db.get_geometry_results(run_id=run_id)
+        geo_results = db.get_geometry_results(run_id=run_id, latest_only=True)
         if not geo_results:
             # Fall back to all geometry results if none scoped to this run
-            geo_results = db.get_geometry_results()
+            geo_results = db.get_geometry_results(latest_only=True)
         if geo_results:
             vulnerability_map: dict[str, dict[str, float]] = {}
             all_models = set()

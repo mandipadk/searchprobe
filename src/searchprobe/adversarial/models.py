@@ -75,7 +75,11 @@ class EvolutionConfig:
     budget_limit: float = 5.0  # USD
     fitness_mode: str = "llm_judge"  # "llm_judge", "cross_encoder", "embedding_sim"
     seed_queries: list[str] = field(default_factory=list)
+    # Category of each seed query (parallel to seed_queries). Seeds keep their
+    # true category; they are never relabelled at random.
+    seed_categories: list[str] = field(default_factory=list)
     target_categories: list[str] = field(default_factory=list)
+    seed: int = 0
 
 
 @dataclass

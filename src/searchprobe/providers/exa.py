@@ -7,7 +7,7 @@ from urllib.parse import urlparse
 
 from exa_py import Exa
 
-from searchprobe.providers.base import SearchProvider
+from searchprobe.providers.base import SearchProvider, looks_rate_limited
 from searchprobe.providers.models import SearchRequest, SearchResponse, SearchResult
 
 
@@ -22,15 +22,37 @@ class ExaProvider(SearchProvider):
     """
 
     NAME: ClassVar[str] = "exa"
-    SUPPORTED_MODES: ClassVar[list[str]] = ["auto", "neural", "fast", "deep"]
+    # Modes are passed to the API verbatim (exa-py ``SearchType``).
+    SUPPORTED_MODES: ClassVar[list[str]] = [
+        "auto",
+        "neural",
+        "fast",
+        "instant",
+        "deep-lite",
+        "deep",
+        "deep-reasoning",
+    ]
+    # Rough per-query estimates used only for budget reservation; check Exa's
+    # pricing page for authoritative numbers. Deep variants run multi-step
+    # searches and are priced conservatively high.
     COST_PER_QUERY: ClassVar[dict[str, float]] = {
         "auto": 0.005,
         "neural": 0.005,
         "fast": 0.005,
-        "deep": 0.005,  # "deep" maps to "auto" internally; same cost
+        "instant": 0.005,
+        "deep-lite": 0.012,
+        "deep": 0.015,
+        "deep-reasoning": 0.025,
     }
     # Content extraction cost per page
     CONTENT_COST_PER_PAGE: ClassVar[float] = 0.001
+
+    def estimate_cost(self, request: SearchRequest) -> float:
+        """Search cost plus per-page content cost when content is requested."""
+        cost = self.COST_PER_QUERY.get(request.search_mode or "auto", 0.005)
+        if request.include_content:
+            cost += request.num_results * self.CONTENT_COST_PER_PAGE
+        return cost
 
     def __init__(self, api_key: str) -> None:
         """Initialize Exa client."""
@@ -54,7 +76,7 @@ class ExaProvider(SearchProvider):
             search_kwargs: dict[str, Any] = {
                 "query": request.query,
                 "num_results": request.num_results,
-                "type": mode if mode != "deep" else "auto",  # Deep uses auto with extra params
+                "type": mode,
             }
 
             # Add content retrieval if requested (exa-py v2+ uses 'contents')
@@ -133,6 +155,8 @@ class ExaProvider(SearchProvider):
                 timestamp=datetime.now(UTC),
                 metadata={
                     "search_type": mode,
+                    # For "auto", Exa reports whether it resolved to neural or keyword.
+                    "resolved_search_type": getattr(response, "resolved_search_type", None),
                     "results_requested": request.num_results,
                     "results_returned": len(results),
                 },
@@ -145,7 +169,7 @@ class ExaProvider(SearchProvider):
             error_msg = str(e)
 
             # Detect rate limiting from error message
-            if "rate" in error_msg.lower() or "429" in error_msg:
+            if looks_rate_limited(error_msg):
                 raise RateLimitError(error_msg, provider=self.NAME)
 
             return SearchResponse(

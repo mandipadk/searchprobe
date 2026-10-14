@@ -28,10 +28,13 @@ class FailureMode(str, Enum):
     PARTIAL_CONSTRAINT = "partial_constraint"
     INVERSE_RESULT = "inverse_result"
     TANGENTIAL_RESULT = "tangential_result"
+    WRONG_CONTENT_TYPE = "wrong_content_type"
+    WRONG_LANGUAGE = "wrong_language"
 
     # Meta failures
     NO_RESULTS = "no_results"
     SEARCH_FAILED = "search_failed"
+    JUDGE_FAILED = "judge_failed"
 
 
 FAILURE_ROOT_CAUSES: dict[FailureMode, dict[str, Any]] = {
@@ -206,7 +209,32 @@ FAILURE_ROOT_CAUSES: dict[FailureMode, dict[str, Any]] = {
         "categories": [],
         "indicators": ["search_failed", "error", "timeout"],
     },
+    FailureMode.WRONG_CONTENT_TYPE: {
+        "description": "Right topic, wrong kind of document (e.g. docs instead of blog posts)",
+        "severity": "medium",
+        "categories": ["instruction_following"],
+        "indicators": ["wrong type", "not a paper", "documentation instead", "content type"],
+    },
+    FailureMode.WRONG_LANGUAGE: {
+        "description": "Results in the wrong language",
+        "severity": "medium",
+        "categories": ["cross_lingual"],
+        "indicators": ["wrong language", "in english instead", "language mismatch"],
+    },
+    FailureMode.JUDGE_FAILED: {
+        "description": "The judge could not produce a verdict (infrastructure failure)",
+        "severity": "low",
+        "categories": [],
+        "indicators": ["judge_failed", "parse_error", "evaluation_failed"],
+    },
 }
+
+# Failure modes the judge may assign; the meta modes are set by code.
+JUDGE_FAILURE_MODES: list[str] = [
+    m.value
+    for m in FailureMode
+    if m not in (FailureMode.NO_RESULTS, FailureMode.SEARCH_FAILED, FailureMode.JUDGE_FAILED)
+]
 
 
 class FailureClassifier:

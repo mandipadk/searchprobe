@@ -2,23 +2,41 @@
 
 import itertools
 import random
+from collections.abc import Callable
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 from searchprobe.queries.models import GroundTruth, Query
-from searchprobe.queries.taxonomy import AdversarialCategory
+from searchprobe.queries.taxonomy import AdversarialCategory, get_category_metadata
 
 
 class QueryTemplate(BaseModel):
     """A parameterized template for generating queries."""
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
     template: str
     category: AdversarialCategory
     difficulty: str = "medium"
     slots: dict[str, list[str]]  # slot_name -> possible values
     ground_truth_template: GroundTruth | None = None
+    # Builds ground truth from slot values when it cannot be expressed as
+    # string formatting (e.g. numeric bounds).
+    ground_truth_builder: Callable[[dict[str, str]], GroundTruth] | None = None
+    # Rejects slot combinations that would produce an incoherent query.
+    is_valid: Callable[[dict[str, str]], bool] | None = None
     adversarial_reason: str | None = None
     max_combinations: int = 10  # Limit combinations per template
+
+
+def _range_ground_truth(slots: dict[str, str]) -> GroundTruth:
+    lo, hi = (float(x) for x in slots["range"].split(" and "))
+    return GroundTruth(
+        strategy="numeric_range",
+        numeric_field=slots.get("unit", "value"),
+        numeric_min=lo,
+        numeric_max=hi,
+    )
 
 
 # Template definitions per category
@@ -38,7 +56,7 @@ TEMPLATES: dict[AdversarialCategory, list[QueryTemplate]] = {
                 ],
             },
             ground_truth_template=GroundTruth(
-                strategy="must_not_contain", must_not_contain_keywords=[]
+                strategy="must_not_contain", must_not_contain_keywords=["{attribute}"]
             ),
             adversarial_reason="Negation 'NOT {attribute}' collapses to '{attribute}' in embeddings",
         ),
@@ -101,15 +119,26 @@ TEMPLATES: dict[AdversarialCategory, list[QueryTemplate]] = {
             adversarial_reason="Dollar amounts require precise numeric understanding",
         ),
         QueryTemplate(
-            template="{things} between {min_val} and {max_val} {unit}",
+            template="{things} between {range} meters tall",
             category=AdversarialCategory.NUMERIC_PRECISION,
             difficulty="hard",
             slots={
-                "things": ["buildings", "mountains", "structures"],
-                "min_val": ["100", "200", "500"],
-                "max_val": ["150", "300", "600"],
-                "unit": ["meters tall", "feet high", "stories"],
+                "things": ["buildings", "skyscrapers", "towers"],
+                "range": ["100 and 150", "200 and 300", "500 and 600"],
+                "unit": ["meters"],
             },
+            ground_truth_builder=_range_ground_truth,
+            adversarial_reason="Range constraints require numeric comparison",
+        ),
+        QueryTemplate(
+            template="mountains between {range} meters high",
+            category=AdversarialCategory.NUMERIC_PRECISION,
+            difficulty="hard",
+            slots={
+                "range": ["3000 and 3500", "5000 and 6000", "7000 and 8000"],
+                "unit": ["meters"],
+            },
+            ground_truth_builder=_range_ground_truth,
             adversarial_reason="Range constraints require numeric comparison",
         ),
     ],
@@ -323,9 +352,11 @@ def generate_from_template(template: QueryTemplate, slot_values: dict[str, str])
     # Format the template
     text = template.template.format(**slot_values)
 
-    # Create ground truth if template has one
+    # Create ground truth: builder > formatted template > category guidance
     ground_truth = None
-    if template.ground_truth_template:
+    if template.ground_truth_builder is not None:
+        ground_truth = template.ground_truth_builder(slot_values)
+    elif template.ground_truth_template:
         # Copy and customize ground truth
         gt_dict = template.ground_truth_template.model_dump(exclude_none=True)
 
@@ -337,6 +368,12 @@ def generate_from_template(template: QueryTemplate, slot_values: dict[str, str])
                 gt_dict[key] = [v.format(**slot_values) if isinstance(v, str) else v for v in value]
 
         ground_truth = GroundTruth(**gt_dict)
+    else:
+        meta = get_category_metadata(template.category)
+        ground_truth = GroundTruth(
+            strategy="manual",
+            manual_judgment=f"{meta.ground_truth_strategy}. Query: '{text}'.",
+        )
 
     # Create adversarial reason
     adversarial_reason = template.adversarial_reason
@@ -363,6 +400,8 @@ def generate_all_from_template(
     slot_values_lists = [template.slots[name] for name in slot_names]
 
     combinations = list(itertools.product(*slot_values_lists))
+    if template.is_valid is not None:
+        combinations = [c for c in combinations if template.is_valid(dict(zip(slot_names, c)))]
 
     # Limit combinations
     limit = max_queries or template.max_combinations

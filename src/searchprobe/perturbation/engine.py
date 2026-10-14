@@ -1,5 +1,6 @@
 """Perturbation engine — orchestrates perturbation, search, and stability measurement."""
 
+import random
 from collections.abc import Callable
 from typing import Any
 
@@ -10,6 +11,7 @@ from searchprobe.perturbation.operators import PerturbationType, apply_perturbat
 from searchprobe.perturbation.stability import (
     compute_sensitivity_map,
     jaccard_similarity,
+    normalize_url,
     rank_biased_overlap,
 )
 from searchprobe.providers.base import SearchProvider
@@ -33,6 +35,7 @@ class PerturbationEngine:
         operators: list[PerturbationType] | None = None,
         max_variants_per_operator: int = 5,
         num_results: int = 10,
+        seed: int = 0,
     ) -> None:
         """Initialize the perturbation engine.
 
@@ -47,7 +50,10 @@ class PerturbationEngine:
             PerturbationType.WORD_DELETE,
             PerturbationType.WORD_SWAP,
             PerturbationType.SYNONYM_REPLACE,
+            PerturbationType.NEGATION_INSERT,
+            PerturbationType.NEGATION_REMOVE,
         ]
+        self.rng = random.Random(seed)
         self.max_variants = max_variants_per_operator
         self.num_results = num_results
 
@@ -64,7 +70,7 @@ class PerturbationEngine:
 
     def _extract_urls(self, response: SearchResponse) -> list[str]:
         """Extract URLs from a search response."""
-        return [str(r.url) for r in response.results]
+        return [normalize_url(str(r.url)) for r in response.results]
 
     async def analyze_query(
         self,
@@ -89,7 +95,7 @@ class PerturbationEngine:
         analyses = []
 
         for operator in self.operators:
-            variants = apply_perturbation(query, operator, self.max_variants)
+            variants = apply_perturbation(query, operator, self.max_variants, rng=self.rng)
 
             for perturbed_query, detail in variants:
                 if not perturbed_query.strip():

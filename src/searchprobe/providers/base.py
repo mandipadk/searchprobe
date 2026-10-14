@@ -1,9 +1,38 @@
 """Abstract base class and protocol for search providers."""
 
+import re
 from abc import ABC, abstractmethod
 from typing import ClassVar, Self
 
 from searchprobe.providers.models import SearchRequest, SearchResponse
+
+_RATE_LIMIT_RE = re.compile(r"\b429\b|rate[ -]?limit|too many requests", re.IGNORECASE)
+_TRANSIENT_RE = re.compile(
+    r"\b(429|500|502|503|504)\b|rate[ -]?limit|too many requests|time(d)?[ -]?out|"
+    r"temporar|connection|unavailable|overloaded|reset by peer",
+    re.IGNORECASE,
+)
+_PERMANENT_RE = re.compile(
+    r"\b(400|401|403|404|422)\b|unauthori[sz]ed|forbidden|invalid api key|bad request",
+    re.IGNORECASE,
+)
+
+
+def looks_rate_limited(message: str) -> bool:
+    """True if an error message indicates a rate limit (not just contains 'rate')."""
+    return bool(_RATE_LIMIT_RE.search(message or ""))
+
+
+def is_transient_error(message: str) -> bool:
+    """Classify an error message as worth retrying.
+
+    Rate limits and known transient failures are retried; clearly permanent
+    failures (auth, bad request, not found) are not. Unknown errors are retried.
+    """
+    message = message or ""
+    if _RATE_LIMIT_RE.search(message) or _TRANSIENT_RE.search(message):
+        return True
+    return not _PERMANENT_RE.search(message)
 
 
 class SearchProvider(ABC):
@@ -71,6 +100,10 @@ class SearchProvider(ABC):
             return response.success
         except Exception:
             return False
+
+    def estimate_cost(self, request: SearchRequest) -> float:
+        """Estimate the USD cost of executing ``request`` (used for budget reservation)."""
+        return self.get_cost(request.search_mode)
 
     def get_cost(self, mode: str | None = None) -> float:
         """Get the cost per query for a specific mode.

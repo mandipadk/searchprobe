@@ -13,6 +13,7 @@ app = typer.Typer(help="Generate benchmark reports.")
 
 @app.callback(invoke_without_command=True)
 def report(
+    ctx: typer.Context,
     run_id: str = typer.Option(
         "latest",
         "--run-id",
@@ -38,6 +39,8 @@ def report(
     ),
 ) -> None:
     """Generate benchmark reports with charts and analysis."""
+    if ctx.invoked_subcommand is not None:
+        return  # e.g. `searchprobe report list-runs` must not generate a report first
     settings = get_settings()
     db = Database(settings.database_path)
 

@@ -9,7 +9,7 @@ from rich.table import Table
 
 from searchprobe.config import get_settings
 from searchprobe.evaluation.judge import SearchJudge
-from searchprobe.evaluation.statistics import compare_providers, summary_statistics
+from searchprobe.evaluation.statistics import compare_all_systems, summary_statistics
 from searchprobe.providers.models import SearchResponse, SearchResult
 from searchprobe.storage import Database
 
@@ -139,7 +139,7 @@ def evaluate(
     async def _run_evaluations():
         return await judge.evaluate_batch(
             eval_batch,
-            max_concurrent=5,
+            max_concurrent=settings.max_concurrent_requests,
             on_complete=_on_complete,
         )
 
@@ -263,33 +263,26 @@ def _display_summary(evaluations: list[dict], show_comparisons: bool) -> None:
         for mode, count in list(stats["failure_modes"].items())[:10]:
             console.print(f"  {mode}: {count}")
 
-    # Provider comparisons
+    # Error rates (infrastructure failures are excluded from the scores above)
+    if stats.get("excluded_errors"):
+        console.print(
+            f"\n[yellow]Excluded {stats['excluded_errors']} infrastructure failures "
+            "(search/judge errors) from quality scores.[/yellow]"
+        )
+        for system, rate in sorted(stats.get("error_rate_by_system", {}).items()):
+            if rate:
+                console.print(f"  {system}: {rate:.1%} error rate")
+
+    # System comparisons: paired by query, BH-corrected across all pairs
     if show_comparisons and len(stats.get("by_provider", {})) >= 2:
-        console.print("\n[bold]Provider Comparisons[/bold]")
-
-        providers = list(stats["by_provider"].keys())
-        for i, prov_a in enumerate(providers):
-            for prov_b in providers[i + 1 :]:
-                # Get scores for comparison
-                scores_a = [
-                    e["weighted_score"]
-                    for e in evaluations
-                    if f"{e['provider']}:{e.get('search_mode', 'default')}" == prov_a
-                ]
-                scores_b = [
-                    e["weighted_score"]
-                    for e in evaluations
-                    if f"{e['provider']}:{e.get('search_mode', 'default')}" == prov_b
-                ]
-
-                if scores_a and scores_b:
-                    comparison = compare_providers(prov_a, scores_a, prov_b, scores_b, paired=False)
-
-                    sig_marker = "*" if comparison.significant else ""
-                    winner = prov_a if comparison.mean_diff > 0 else prov_b
-                    console.print(
-                        f"  {prov_a} vs {prov_b}: "
-                        f"Δ={comparison.mean_diff:+.3f} "
-                        f"(p={comparison.p_value:.3f}{sig_marker}) "
-                        f"[{winner} wins]"
-                    )
+        console.print("\n[bold]System Comparisons[/bold] (paired by query, BH-corrected)")
+        for comp in compare_all_systems(evaluations):
+            sig_marker = "*" if comp.significant else ""
+            winner = comp.provider_a if comp.mean_diff > 0 else comp.provider_b
+            console.print(
+                f"  {comp.provider_a} vs {comp.provider_b}: "
+                f"Δ={comp.mean_diff:+.3f} "
+                f"[{comp.ci.lower:+.3f}, {comp.ci.upper:+.3f}] "
+                f"(p={comp.p_value:.3f}{sig_marker}, n={comp.ci.n}) "
+                f"[{winner} ahead]"
+            )
