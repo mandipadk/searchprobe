@@ -1,9 +1,14 @@
 """Fitness evaluation for adversarial query individuals."""
 
 import asyncio
+from contextvars import ContextVar
 from typing import Any
 
 from searchprobe.adversarial.models import Individual
+
+# Spend of the evaluation running in the current asyncio task. Population members are
+# evaluated concurrently, so a per-instance attribute would mix their costs.
+_task_cost: ContextVar[float] = ContextVar("fitness_task_cost", default=0.0)
 
 
 class FitnessEvaluator:
@@ -111,9 +116,13 @@ class FitnessEvaluator:
         return cost
 
     async def _evaluate_with_cost(self, individual: Individual) -> tuple[float, float]:
-        self._last_cost = 0.0
+        _task_cost.set(0.0)
         fitness = await self.evaluate(individual)
-        return fitness, self._last_cost
+        return fitness, _task_cost.get()
+
+    @staticmethod
+    def _add_cost(cost: float) -> None:
+        _task_cost.set(_task_cost.get() + cost)
 
     async def _evaluate_llm_judge(self, individual: Individual) -> float:
         """Evaluate using LLM judge — most accurate but expensive."""
@@ -130,7 +139,7 @@ class FitnessEvaluator:
                 search_mode=self.search_mode,
             )
             response = await self.provider.search(request)
-            self._last_cost = getattr(self, "_last_cost", 0.0) + response.cost_usd
+            self._add_cost(response.cost_usd)
 
             if response.error:
                 return 0.0  # infrastructure failure is not an adversarial success
@@ -142,7 +151,7 @@ class FitnessEvaluator:
                 search_response=response,
             )
 
-            self._last_cost += getattr(evaluation, "cost_usd", 0.0)
+            self._add_cost(getattr(evaluation, "cost_usd", 0.0))
             if not evaluation.counts_for_quality:
                 return 0.0
             # Fitness = 1 - score (lower relevance = higher adversarial fitness)
@@ -166,7 +175,7 @@ class FitnessEvaluator:
                 search_mode=self.search_mode,
             )
             response = await self.provider.search(request)
-            self._last_cost = getattr(self, "_last_cost", 0.0) + response.cost_usd
+            self._add_cost(response.cost_usd)
 
             if response.error:
                 return 0.0

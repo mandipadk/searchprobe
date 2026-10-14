@@ -202,6 +202,13 @@ def _display_summary(evaluations: list[dict], show_comparisons: bool) -> None:
 
     # Overall stats
     console.print("\n[bold]Evaluation Summary[/bold]")
+    if stats["count"] == 0:  # every evaluation was a search or judge error
+        console.print(
+            f"  [red]No quality evaluations: {stats.get('excluded_errors', 0)} errors[/red]"
+        )
+        for system, rate in sorted(stats.get("error_rate_by_system", {}).items()):
+            console.print(f"  {system}: {rate:.0%} errors")
+        return
     console.print(f"  Total evaluated: {stats['count']}")
     console.print(f"  Mean score: {stats['mean']:.3f}")
     console.print(f"  Median score: {stats['median']:.3f}")

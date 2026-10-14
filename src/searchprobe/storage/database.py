@@ -934,6 +934,20 @@ class Database:
                 )
                 count += 1
 
+            # Cells where every evaluation was an infrastructure error still get an
+            # "overall" row (no scores, failure_rate 1.0) instead of disappearing.
+            for (system, category), total in totals.items():
+                if (system, category, "overall") in buckets:
+                    continue
+                conn.execute(
+                    """INSERT INTO aggregate_scores
+                       (run_id, provider, category, dimension, mean_score,
+                        std_score, ci_lower, ci_upper, n_queries, failure_rate)
+                       VALUES (?, ?, ?, 'overall', NULL, NULL, NULL, NULL, 0, ?)""",
+                    (run_id, system, category, errors[(system, category)] / total),
+                )
+                count += 1
+
             conn.commit()
             return count
 

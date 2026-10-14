@@ -23,6 +23,9 @@ class BenchmarkConfig:
 
     providers: list[str]
     exa_modes: list[str] = field(default_factory=lambda: ["auto"])
+    # Per-provider modes for Exa-backed providers; overrides exa_modes for listed ones
+    # (a profile with exa:neural and aris+exa:auto must not run exa:auto too).
+    modes_by_provider: dict[str, list[str]] = field(default_factory=dict)
     num_results: int = 10
     include_content: bool = True
     max_content_chars: int = 5000
@@ -140,6 +143,7 @@ class BenchmarkRunner:
                 config={
                     "providers": self.config.providers,
                     "exa_modes": self.config.exa_modes,
+                    "modes_by_provider": self.config.modes_by_provider,
                     "num_results": self.config.num_results,
                     "budget_limit": self.config.budget_limit,
                     "manifest": build_manifest(
@@ -233,7 +237,8 @@ class BenchmarkRunner:
             for provider in self.config.providers:
                 # For Exa (bare or wrapped, e.g. aris+exa), run each mode separately
                 if provider == "exa" or provider.endswith("+exa"):
-                    for mode in self.config.exa_modes:
+                    modes = self.config.modes_by_provider.get(provider, self.config.exa_modes)
+                    for mode in modes:
                         tasks.append(
                             QueryTask(
                                 query_id=query.get("id", "unknown"),

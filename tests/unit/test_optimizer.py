@@ -189,3 +189,38 @@ class TestPhase0Regressions:
         asyncio.run(ev.evaluate_population(inds))
         asyncio.run(ev.evaluate_population([Individual(query="same query")]))
         assert len(calls) == 1
+
+
+def test_concurrent_live_evaluations_keep_their_own_costs():
+    import asyncio
+
+    from searchprobe.adversarial.fitness import FitnessEvaluator
+    from searchprobe.pipeline.cost_tracker import CostTracker
+    from searchprobe.providers.models import SearchResponse
+
+    class Provider:
+        async def search(self, request):
+            cost = float(len(request.query))
+            await asyncio.sleep(0.01 * (5 - len(request.query)))
+            return SearchResponse(provider="p", query=request.query, results=[],
+                                  latency_ms=0, cost_usd=cost)
+
+    class Judge:
+        async def evaluate(self, query_id, query_text, category, search_response):
+            await asyncio.sleep(0.01 * len(query_text))
+
+            class E:
+                cost_usd = 0.5
+                counts_for_quality = True
+                weighted_score = 0.4
+
+            return E()
+
+    tracker = CostTracker(budget_limit=1000)
+    ev = FitnessEvaluator(mode="llm_judge", provider=Provider(), judge=Judge(),
+                          cost_tracker=tracker, max_concurrent=4)
+    population = [Individual(query=q) for q in ["a", "bb", "ccc", "dddd"]]
+    asyncio.run(ev.evaluate_population(population))
+    expected = (1 + 2 + 3 + 4) + 4 * 0.5
+    assert ev.total_cost == pytest.approx(expected)
+    assert tracker.get_total() == pytest.approx(expected)

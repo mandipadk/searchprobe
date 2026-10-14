@@ -68,3 +68,19 @@ def test_profile_rejects_unknown_keys(tmp_path):
     (tmp_path / "p.toml").write_text('name = "x"\nsystems = ["brave"]\nbudjet = 3\n')
     with pytest.raises(ValidationError):
         ResearchProfile.from_toml(tmp_path / "p.toml")
+
+
+def test_each_exa_backed_system_runs_only_its_own_mode(tmp_path):
+    from searchprobe.pipeline.runner import BenchmarkConfig, BenchmarkRunner
+    from searchprobe.storage import Database
+
+    profile = ResearchProfile(name="t", systems=["exa:neural", "aris+exa:auto", "brave"])
+    providers, modes = profile.providers_and_modes()
+    assert providers == ["exa", "aris+exa", "brave"]
+    runner = BenchmarkRunner(
+        BenchmarkConfig(providers=providers, modes_by_provider=modes),
+        settings=Settings(_env_file=None), db=Database(str(tmp_path / "db.sqlite")),
+    )
+    tasks = runner._build_tasks([{"id": "q", "text": "x", "category": "negation"}])
+    assert {(t.provider_name, t.search_mode) for t in tasks} == {
+        ("exa", "neural"), ("aris+exa", "auto"), ("brave", None)}

@@ -42,17 +42,19 @@ class ResearchProfile(BaseModel):
         with open(path, "rb") as f:
             return cls.model_validate(tomllib.load(f))
 
-    def providers_and_modes(self) -> tuple[list[str], list[str]]:
-        """Split system keys into runner providers and the Exa mode list."""
+    def providers_and_modes(self) -> tuple[list[str], dict[str, list[str]]]:
+        """Split system keys into runner providers and each Exa-backed provider's modes."""
         providers: list[str] = []
-        exa_modes: list[str] = []
+        modes: dict[str, list[str]] = {}
         for key in self.systems:
             name, _, mode = key.partition(":")
             if name not in providers:
                 providers.append(name)
-            if mode and (name == "exa" or name.endswith("+exa")) and mode not in exa_modes:
-                exa_modes.append(mode)
-        return providers, exa_modes or ["auto"]
+            if name == "exa" or name.endswith("+exa"):
+                wanted = modes.setdefault(name, [])
+                if (mode or "auto") not in wanted:
+                    wanted.append(mode or "auto")
+        return providers, modes
 
 
 async def run_research(profile: ResearchProfile, settings: Any, log=print) -> dict[str, Any]:
@@ -82,11 +84,11 @@ async def run_research(profile: ResearchProfile, settings: Any, log=print) -> di
 
     qs_id = db.add_cases(cases, name=f"research:{profile.name}")
     queries = db.get_queries(query_set_id=qs_id)
-    providers, exa_modes = profile.providers_and_modes()
+    providers, modes_by_provider = profile.providers_and_modes()
     runner = BenchmarkRunner(
         BenchmarkConfig(
             providers=providers,
-            exa_modes=exa_modes,
+            modes_by_provider=modes_by_provider,
             num_results=profile.num_results,
             budget_limit=profile.budget_search,
         ),

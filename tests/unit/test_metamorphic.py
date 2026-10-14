@@ -93,3 +93,37 @@ def test_budget_stops_searches():
     run = asyncio.run(engine.run(cases, variants))
     assert len(provider.calls) == 3
     assert run.skipped_for_budget > 0
+
+
+class _CountingJudge:
+    def __init__(self, cost: float):
+        self.cost = cost
+        self.calls = 0
+
+    async def judge(self, case, evidence, decided=None):
+        self.calls += 1
+        cost = self.cost
+
+        class _J:
+            cost_usd = cost
+
+            def is_fully_satisfying(self, twin):
+                return True
+
+        return _J()
+
+
+def test_direction_judging_is_charged_to_the_budget():
+    cases = _cases()
+    variants = build_variants(cases, repeats=1, typos=False)
+    tracker = CostTracker(budget_limit=0.035)
+    engine = MetamorphicEngine({"p": FakeProvider(aware_engine, name="p")},
+                               num_results=2, cost_tracker=tracker)
+    run = asyncio.run(engine.run(cases, variants))
+    judge = _CountingJudge(cost=0.01)
+    results = asyncio.run(engine.judge_directions(run, cases, variants, judge, k=2))
+    assert judge.calls == 3  # the fourth call does not fit in the budget
+    assert run.cost_usd == pytest.approx(0.03)
+    assert tracker.get_total() == pytest.approx(0.03)
+    assert run.skipped_for_budget > 0
+    assert len(results) == 0  # no pair was judged completely (4 documents per pair)

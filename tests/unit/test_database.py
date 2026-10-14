@@ -136,3 +136,20 @@ def test_materialize_aggregate_scores_idempotent(temp_db):
     aggs = temp_db.get_aggregate_scores(run_id)
     # Should not have duplicates
     assert len(aggs) == count1
+
+
+def test_error_only_cells_keep_a_failure_row(temp_db):
+    qs_id = temp_db.create_query_set(name="Err Test")
+    q_id = temp_db.add_query(qs_id, "test query", "negation")
+    run_id = temp_db.create_run(qs_id, name="Err Run")
+    temp_db.add_evaluation(run_id, {"query_id": q_id, "provider": "brave",
+                                    "status": "search_error", "weighted_score": 0.0})
+    temp_db.add_evaluation(run_id, {"query_id": q_id, "provider": "exa",
+                                    "dimension_scores": {"relevance": {"score": 0.9}},
+                                    "weighted_score": 0.9})
+    temp_db.materialize_aggregate_scores(run_id)
+    overall = {a["provider"]: a for a in temp_db.get_aggregate_scores(run_id)
+               if a["dimension"] == "overall"}
+    assert overall["brave"]["failure_rate"] == 1.0
+    assert overall["brave"]["n_queries"] == 0 and overall["brave"]["mean_score"] is None
+    assert overall["exa"]["mean_score"] == pytest.approx(0.9)

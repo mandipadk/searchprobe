@@ -155,20 +155,50 @@ class MetamorphicEngine:
         judge: Any,
         fetcher: Any | None = None,
         k: int = 5,
+        judge_cost_estimate: float = 0.01,
     ) -> list[DirectionResult]:
-        """For DIR variants, judge base and variant results against the *twin's* constraints."""
+        """For DIR variants, judge base and variant results against the *twin's* constraints.
+
+        LLM judge calls are reserved from the run's budget like searches; a pair whose
+        lists cannot be judged completely (budget, judge error) is left out.
+        """
         from searchprobe.judging.checkers import run_checkers
+        from searchprobe.judging.engine import checker_only_judgment
         from searchprobe.judging.llm_judge import evidence_from
 
         by_case = {c.id: c for c in cases}
         out: list[DirectionResult] = []
+
+        async def judge_doc(twin: TestCase, url: str, ev: Any, snap: Any) -> Any | None:
+            verdicts = run_checkers(twin, url, snap)
+            decided = checker_only_judgment(twin, url, ev, verdicts)
+            if decided is not None:
+                return decided
+            reservation = None
+            if self.cost_tracker is not None:
+                reservation = self.cost_tracker.try_reserve(judge_cost_estimate)
+                if reservation is None:
+                    run.skipped_for_budget += 1
+                    return None
+            try:
+                j = await judge.judge(twin, ev, decided=verdicts)
+            except Exception as e:  # infra failure: leave the pair out, never guess
+                logger.warning("Direction judging failed for %s: %s", url, e)
+                if self.cost_tracker is not None:
+                    self.cost_tracker.release(reservation)
+                return None
+            if self.cost_tracker is not None:
+                self.cost_tracker.commit(reservation, "judge", "metamorphic", j.cost_usd)
+            run.cost_usd += j.cost_usd
+            return j
+
         for (system, case_id, relation), (base_resp, var_resp) in run.raw.items():
             v = next((x for x in variants if x.case_id == case_id and x.relation == relation), None)
             if v is None or v.twin_case_id not in by_case:
                 continue
             twin = by_case[v.twin_case_id]
 
-            async def share(resp: Any, twin: TestCase = twin) -> tuple[float, int]:
+            async def share(resp: Any, twin: TestCase = twin) -> tuple[float, int] | None:
                 results = resp.results[:k]
                 if not results:
                     return 0.0, 0
@@ -178,12 +208,20 @@ class MetamorphicEngine:
                 for r in results:
                     url = str(r.url)
                     ev = evidence_from(url, snaps.get(url), r.title, r.content or r.snippet)
-                    j = await judge.judge(twin, ev, decided=run_checkers(twin, url, snaps.get(url)))
+                    j = await judge_doc(twin, url, ev, snaps.get(url))
+                    if j is None:
+                        return None
                     sat += j.is_fully_satisfying(twin)
                 return sat / len(results), len(results)
 
-            s_var, n_var = await share(var_resp)
-            s_base, _ = await share(base_resp)
-            out.append(DirectionResult(system, case_id, relation, s_var, s_base, n_var))
+            var_share = await share(var_resp)
+            base_share = await share(base_resp) if var_share is not None else None
+            if var_share is None or base_share is None:
+                continue
+            out.append(
+                DirectionResult(
+                    system, case_id, relation, var_share[0], base_share[0], var_share[1]
+                )
+            )
         run.directions = out
         return out
