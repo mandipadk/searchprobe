@@ -27,6 +27,11 @@ searchprobe metamorphic --systems exa:neural,exa:auto,brave -c negation --out re
   small, curated sets (e.g. EU membership, Nobel laureates of a year). For other cases a
   document about an entity outside the answer set is judged on its content, not penalized
   for being absent from the set.
+- Wikidata membership data has errors. Generation stops unless every organization's current
+  member count matches `EXPECTED_MEMBER_COUNTS` in `generators/wikidata.py`; known errors
+  are corrected in `MEMBERSHIP_ADD` / `MEMBERSHIP_REMOVE` (as of 2026-10: Slovakia missing
+  from the Council of Europe, the UK from the Commonwealth, Australia listed in ASEAN,
+  Angola still in OPEC). Ended memberships (the UK in the EU) are excluded.
 - Numeric values are Wikidata's best-ranked statements at generation time; populations in
   particular move. Hard negatives are entities just outside the range.
 - Cases marked `validation: "auto"` passed schema checks but have not been reviewed by a

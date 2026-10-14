@@ -30,6 +30,22 @@ The sections below give the evidence, then the plan.
 
 ---
 
+## Implementation status (updated 2026-10-14)
+
+All seven phases are implemented on branch `claude/wonderful-tesla-5jfccl`, with 296 tests
+passing without network or API keys.
+
+| Phase | Commit | Delivered | Acceptance criteria still needing live runs |
+|---|---|---|---|
+| 0: honest numbers | `a77dbe0` (+ `96e03bd` lint) | All §3 bugs fixed with regression tests ($2 budget now spends ≤ $2, judge concurrent, modes separated, paired stats, RBO/nDCG fixed) | none |
+| 1: measurement core | `2181969` | Evidence layer, per-document constraint judging, IR metrics, scorecards, calibration tooling | judge κ ≥ 0.6 needs ~200 human labels (`searchprobe calibrate label`) |
+| 2: verifiable dataset | `812478f` (+ dataset fix in the Phase 7 docs commit) | TestCase v2, 321 cases (250 base + 71 twins; 186 Wikidata-backed with answer/negative sets, ids and memberships verified before generation), LLM v2 + answerability filter, review CLI | ≥ 50 base cases per core category: currently 23 negation, 16 numeric, 44 temporal, 31 entity, 12 multi-constraint, 18 compositional, 12 boolean; grow with `cases generate` |
+| 3: metamorphic | `daa1ebe` | OBI vs. noise floor, INV/DIR variants, judged direction | OBI per provider needs provider keys |
+| 4: explanations | `f9a6a37` | Triplets (known sets + judged pools), 7 scorer families with correct prompts, per-case AUC; geometry statistics guarded | Per-case AUC needs a judged provider run; first probe results in `docs/findings/` |
+| 5: discovery | `caa8221` | Case-level mutations, differential fitness with answerability, MAP-Elites, re-evaluation, promotion | Human validity check of discovered cases |
+| 6: Aris | `e0e748c` | `aris+<provider>` verify-and-rerank wrapper; legacy crash and security fixes | Measured gain: `searchprobe research --profile profiles/research/aris_ablation.toml` |
+| 7: consolidation | `003c70d` (+ docs) | `research` pipeline, manifests, dashboard scorecard, Modal as thin wrapper, dead code removed, README | none |
+
 ## 1. The core problem, restated precisely
 
 "Neural search fails on negation" is not a finding until four questions are answered:

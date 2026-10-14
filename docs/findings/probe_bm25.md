@@ -4,11 +4,11 @@ Pairwise accuracy: how often a scorer ranks the document that satisfies the quer
 
 | Category | bm25 |
 |---|---|
-| boolean_logic | 0% [0%, 0%] (n=8) |
+| boolean_logic | 19% [6%, 34%] (n=32) |
 | compositional | 100% [100%, 100%] (n=1) |
-| entity_disambiguation | 100% [100%, 100%] (n=6) |
-| multi_constraint | 55% [35%, 75%] (n=20) |
-| negation | 39% [26%, 52%] (n=54) |
-| numeric_precision | 42% [26%, 58%] (n=38) |
-| temporal_constraint | 40% [0%, 80%] (n=5) |
-| **all** | 43% [35%, 52%] (n=132) |
+| entity_disambiguation | 100% [100%, 100%] (n=2) |
+| multi_constraint | 61% [39%, 78%] (n=23) |
+| negation | 33% [23%, 43%] (n=94) |
+| numeric_precision | 57% [42%, 72%] (n=40) |
+| temporal_constraint | 45% [18%, 73%] (n=11) |
+| **all** | 40% [33%, 48%] (n=203) |

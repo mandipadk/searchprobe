@@ -1,248 +1,147 @@
 # SearchProbe
 
-**Adversarial benchmark and research framework for neural search engines.**
+**A measurement instrument for where, and why, neural search fails on queries whose meaning
+depends on logic: negation, numbers, dates, conjunctions, set differences, entity identity
+and instructions.**
 
-SearchProbe goes beyond testing *that* search fails — it measures *why* by analyzing embedding space geometry, validating with cross-encoders, and using evolutionary optimization to discover failure modes automatically.
+"Neural search fails on negation" is a claim; SearchProbe turns it into evidence:
 
-## Why SearchProbe?
+| Question | How SearchProbe answers it |
+|---|---|
+| **Did it fail?** | Every returned document is fetched and judged **per constraint** (*is this an AI company?*), with deterministic checkers for what is mechanical (language, publication date, membership of a Wikidata answer set) and an LLM judge for the rest. |
+| **How badly, compared with what?** | Rank-aware metrics (**violation@k**, all-constraints-satisfied@k, pooled nDCG@10, MRR) with bootstrap CIs, paired by case, Benjamini-Hochberg corrected. Each engine's own run-to-run noise is measured. |
+| **Without ground truth?** | **Metamorphic tests**: each case has a minimal-pair *twin* (negation removed, number ×10, year shifted). The **Operator Blindness Index** measures how much an engine's results change when the meaning changes, against its own noise floor. |
+| **Why?** | **Triplet probes**: does an open retriever score a satisfying document above a violating one? Linked *per case* to provider failures (ROC AUC). |
+| **Can it be fixed?** | **Aris** wraps any provider with constraint parsing, over-retrieval, per-document verification and reranking, and is scored as another system on the same cases. |
 
-Neural/embedding-based search engines (like [Exa.ai](https://exa.ai)) represent a paradigm shift from traditional keyword search. But embeddings have specific, predictable failure modes:
-
-- **Negation blindness**: "companies NOT in AI" returns AI companies
-- **Numeric imprecision**: "exactly 50 employees" matches any company size
-- **Temporal drift**: "January 2024" and "January 2025" look similar in vector space
-- **Antonym confusion**: "increase" and "decrease" are embedding neighbors
-
-SearchProbe generates adversarial queries that exploit these weaknesses, runs them against multiple search providers, and uses LLM judges to evaluate result quality. The research modules then explain *why* failures occur at the geometric level.
-
-## Features
-
-### Benchmarking
-- **13 adversarial query categories** with failure hypotheses grounded in embedding theory
-- **Multi-provider benchmarking**: Exa, Tavily, Brave Search, Google (via SerpAPI)
-- **3-tier query generation**: hand-curated seeds, parameterized templates, LLM-generated
-- **LLM-as-judge evaluation** with category-specific dimension weighting
-- **Statistical rigor**: confidence intervals, bootstrap CIs, Benjamini-Hochberg correction
-
-### Research Modules
-- **Embedding Geometry Analyzer** — Measures cosine similarity collapse, intrinsic dimensionality, and isotropy to explain *why* embeddings fail on each adversarial category
-- **Cross-Encoder Validation** — Quantifies the "embedding gap" by re-scoring results with a cross-encoder, computing NDCG improvement potential per category
-- **Perturbation Analysis Engine** — Systematically perturbs queries and measures result stability, producing word-level sensitivity maps
-- **Adversarial Query Optimizer** — Evolutionary optimization that breeds worst-case queries, discovering failure modes humans wouldn't think of
-
-### Visualization & Reporting
-- **Interactive dashboard** (Streamlit) with 8 pages including geometry, robustness, and validation views
-- **Publication-quality charts**: vulnerability heatmaps, t-SNE/UMAP projections, 3D embedding explorers, sensitivity maps
-- **HTML reports** with radar charts and failure taxonomies
-
-## Installation
+## Install
 
 ```bash
-# Clone the repository
-git clone https://github.com/mandipadk/searchprobe.git
-cd searchprobe
-
-# Create virtual environment
-python -m venv venv
-source venv/bin/activate  # or `venv\Scripts\activate` on Windows
-
-# Install in development mode
-pip install -e ".[dev]"
-
-# Install analysis dependencies (for geometry, validation, perturbation modules)
-pip install -e ".[analysis]"
-
-# Copy environment template and add your API keys
-cp .env.example .env
+git clone https://github.com/mandipadk/searchprobe.git && cd searchprobe
+python -m venv .venv && source .venv/bin/activate
+pip install -e ".[dev]"            # core + tests
+pip install -e ".[analysis]"       # optional: embedding/reranker probes (torch, sentence-transformers)
+cp .env.example .env               # add provider keys and an Anthropic key (or Vertex AI)
 ```
 
-The `analysis` extra installs sentence-transformers, PyTorch, scikit-learn, UMAP, and NLTK. Models auto-download on first use (~100-400MB each).
-
-## Quick Start
-
-### Benchmarking Workflow
+## Quick start
 
 ```bash
-# Generate adversarial queries
-searchprobe generate --count 20
-
-# Run benchmark against providers
-searchprobe run --providers exa,tavily --exa-modes auto,neural
-
-# Evaluate results with LLM judge
-searchprobe evaluate --run-id latest
-
-# Generate reports
-searchprobe report --format both
-
-# Launch interactive dashboard
-searchprobe dashboard
+# One command: cases -> search -> judge -> scorecard -> metamorphic tests
+searchprobe research --profile profiles/research/negation.toml
+# => reports/negation/{scorecard.md, scorecard.json, metamorphic.md, manifest.json}
 ```
 
-### Research Workflow
+Or step by step:
 
 ```bash
-# Analyze embedding geometry — understand WHY search fails
-searchprobe geometry --models all-MiniLM-L6-v2,all-mpnet-base-v2
-
-# Validate with cross-encoder — measure the embedding gap
-searchprobe validate --run-id latest
-
-# Perturbation analysis — find load-bearing words
-searchprobe perturb --run-id latest --operators word_delete,word_swap
-
-# Evolve adversarial queries — breed worst-case failures
-searchprobe evolve --provider exa --generations 20 --population 30
+searchprobe cases list                                   # the dataset (321 cases)
+searchprobe cases import -c negation,boolean_logic       # load into the DB as a query set
+searchprobe run --providers exa,brave --exa-modes neural,auto
+searchprobe judge --budget 5 --out reports/scorecard.md  # fetch pages, judge each document
+searchprobe scorecard --format markdown                  # recompute from cache (no LLM calls)
+searchprobe metamorphic -s exa:neural,exa:auto,brave -c negation --out reports/obi.md
+searchprobe dashboard                                    # 🎯 Scorecard page + legacy views
 ```
+
+Is Aris better than its base engine?
+
+```bash
+searchprobe research --profile profiles/research/aris_ablation.toml   # exa:neural vs aris+exa:neural
+aris wrap "European countries that are not members of the European Union" --base exa
+```
+
+## The dataset
+
+`data/cases/v1/` holds 321 typed, versioned test cases: 250 base cases plus 71 minimal-pair
+twins ([details](data/cases/README.md)):
+
+- **Wikidata** (186): answer *and* negative sets from SPARQL. Examples: European non-members of
+  the EU (France is the violating near-miss), countries with a population between 1 and 2
+  million (hard negatives just outside the range), Nobel laureates of a given year, US
+  namesake cities vs. the famous original (Paris, Texas vs. Paris), river tributaries. Twins
+  get their own answer sets from the same data. Hard-coded Wikidata ids are checked against
+  their labels, and organization memberships against known member counts, before generation.
+- **Structured** (105): language constraints checked by a language detector, publication
+  windows checked from extracted page dates, document-type instructions.
+- **Seeds** (30): the original hand-written queries converted to typed constraints.
+
+Grow it with `searchprobe cases generate wikidata|structured|llm` (LLM cases need typed
+constraints and can be filtered for answerability), harden it with `searchprobe discover`
+(MAP-Elites with differential fitness: the target must fail **and** a reference engine must
+succeed), and promote reviewed cases with `searchprobe cases review`.
+
+## First findings
+
+From `docs/findings/` (203 Wikidata triplets, open models on CPU):
+
+- None of the tested retrievers (MiniLM, BGE-small, E5-base, Qwen3-Embedding-0.6B, MS MARCO
+  MiniLM and BGE rerankers) prefers the satisfying document more often than chance: **48-53%**
+  overall. On "members of X but not of Y" every model is **below** chance (16-34%), because
+  the violating documents mention both organizations. BM25 is at **40%** overall.
+
+Provider-level scorecards need provider keys; run `searchprobe research` to produce yours.
+
+## Commands
+
+| Command | Purpose |
+|---|---|
+| `cases list/validate/import/twins/review` | Inspect, check, load and curate test cases |
+| `cases generate wikidata/structured/llm` | Build verifiable cases |
+| `run` | Search every case with every system (budget enforced by reservation) |
+| `judge` / `scorecard` | Per-document judging; metrics with CIs; failure exhibits |
+| `calibrate label/report` | Label a stratified sample by hand; Cohen's κ of judge vs. human |
+| `metamorphic` | Operator Blindness Index (DIR twins, INV typos/paraphrases, noise floor) |
+| `explain triplets/probe` | Triplet probes on open retrievers; per-case failure prediction |
+| `discover` | Breed harder, still-answerable variants of cases |
+| `research` | Run a full profile end to end |
+| `evaluate`, `report`, `geometry`, `validate`, `perturb`, `evolve`, `session` | Legacy list-level tools (kept, corrected, superseded by the above) |
 
 ## Architecture
 
 ```
 src/searchprobe/
-├── adversarial/      # Evolutionary query optimizer
-│   ├── crossover.py  #   Crossover operators (clause swap, constraint merge)
-│   ├── fitness.py    #   Fitness evaluation (LLM judge, cross-encoder, embedding)
-│   ├── mutations.py  #   Mutation operators (negation toggle, entity swap, etc.)
-│   └── optimizer.py  #   Evolutionary loop with tournament selection
-├── cli/              # CLI commands (generate, run, evaluate, geometry, etc.)
-├── config/           # Environment-based configuration
-├── dashboard/        # Streamlit dashboard (8 pages)
-├── evaluation/       # LLM-as-judge + statistical analysis
-├── geometry/         # Embedding space geometry analysis
-│   ├── analyzer.py   #   Core analyzer using sentence-transformers
-│   ├── metrics.py    #   Cosine sim, intrinsic dimensionality, isotropy
-│   ├── pairs.py      #   70+ curated adversarial embedding pairs
-│   └── vulnerability.py  # Calibrated vulnerability scoring
-├── perturbation/     # Systematic robustness testing
-│   ├── engine.py     #   Perturbation + search + stability measurement
-│   ├── operators.py  #   Word delete/swap, negation, synonym replace
-│   └── stability.py  #   Jaccard, Rank-Biased Overlap, sensitivity maps
-├── pipeline/         # Benchmark orchestration, rate limiting, cost tracking
-├── providers/        # Search provider adapters (Exa, Tavily, Brave, SerpAPI)
-├── queries/          # Query generation (seeds, templates, LLM)
-├── reporting/        # Chart generation (Plotly) and HTML reports
-├── storage/          # SQLite database with WAL mode
-├── utils/            # Shared parsing and logging utilities
-└── validation/       # Cross-encoder validation and gap analysis
+├── cases/         TestCase v2 schema, twins, converters, generators (wikidata, structured, llm)
+├── evidence/      fetch once per URL, main-text/date/language extraction, snapshots, passages
+├── judging/       deterministic checkers, per-document LLM judge, judgment cache, run engine
+├── metrics/       violation@k, nDCG@k (pooled), scorecards, Markdown rendering
+├── calibration/   human labels, stratified sampling, kappa
+├── metamorphic/   variants, OBI, engine, reports
+├── explain/       triplets, scorers (BM25, bi-/cross-encoders, OpenAI), probes, AUC
+├── discovery/     case mutations, differential fitness, MAP-Elites
+├── pipeline/      benchmark runner, cost tracker (reservations), rate limiter, research runs
+├── providers/     Exa, Tavily, Brave, SerpAPI, resilient wrapper, registry (incl. aris+<base>)
+├── llm.py         structured-output Claude calls, refusal handling, cost accounting
+├── manifest.py    run manifests (git SHA, versions, judge)
+└── (legacy)       evaluation/ (list-level judge), geometry/, validation/, perturbation/,
+                   adversarial/, intelligence/, reporting/, dashboard/
+src/aris/          wrapper.py (constraint-aware verify-and-rerank); other modules parked
 ```
 
-## Configuration
+## Methodology notes and limitations
 
-Set your API keys in `.env`:
-
-```env
-SEARCHPROBE_EXA_API_KEY=your-exa-key
-SEARCHPROBE_TAVILY_API_KEY=your-tavily-key
-SEARCHPROBE_BRAVE_API_KEY=your-brave-key
-SEARCHPROBE_SERPAPI_API_KEY=your-serpapi-key
-SEARCHPROBE_ANTHROPIC_API_KEY=your-anthropic-key
-```
-
-## Adversarial Categories
-
-| Category | Failure Hypothesis |
-|----------|-------------------|
-| Negation | Embeddings collapse "NOT X" to "X" |
-| Numeric Precision | Numbers are tokens, not values |
-| Temporal Constraint | Dates are weakly encoded |
-| Multi-Constraint | Similarity averages constraints |
-| Polysemy | Word senses blend together |
-| Compositional | Word order is partially lost |
-| Antonym Confusion | Antonyms are distributional neighbors |
-| Specificity Gradient | Resolution limits in embedding space |
-| Cross-Lingual | Multilingual alignment gaps |
-| Counterfactual | Returns factual instead of hypothetical |
-| Boolean Logic | No native AND/OR/NOT operators |
-| Entity Disambiguation | Named entities conflate |
-| Instruction Following | Meta-instructions ignored |
-
-## Key Research Concepts
-
-### Embedding Geometry Analysis
-If `cos(embed("companies in AI"), embed("companies NOT in AI")) = 0.96`, then **any** embedding-based retrieval system will fail on negation — it's a fundamental geometric limitation, not a provider bug. SearchProbe measures:
-
-- **Adversarial Collapse Ratio** — `adversarial_sim / baseline_sim` (>1 means adversarial pairs are more similar than they should be)
-- **Local Intrinsic Dimensionality** — MLE estimate per Amsaleg et al. 2015 (lower = queries clustered in subspace)
-- **Isotropy Score** — How uniformly distributed embeddings are (per Mu & Viswanath 2018)
-- **Vulnerability Score** — Composite metric per category, 0.0 (robust) to 1.0 (catastrophic collapse)
-
-### Cross-Encoder Validation
-Cross-encoders jointly encode (query, document) pairs at O(n) cost, producing much more accurate scores than bi-encoders. By re-scoring results, we quantify the exact "embedding gap":
-- **NDCG improvement potential** per category
-- **Kendall's tau** rank correlation between provider ranking and optimal ranking
-
-### Perturbation Analysis
-Systematic query modification reveals which words are "load-bearing" for retrieval, producing sensitivity maps analogous to attention visualization in NLP.
-
-## Remote Compute
-
-SearchProbe's research modules (geometry, validation, perturbation, evolution) require heavy ML dependencies (PyTorch, sentence-transformers, scikit-learn). Two remote compute options are provided so you don't need to install these locally.
-
-### Google Colab
-
-Open `notebooks/searchprobe_analysis.ipynb` in [Google Colab](https://colab.research.google.com/) for an interactive GPU-powered research walkthrough. The notebook covers all analysis modules with inline visualizations.
-
-```
-notebooks/searchprobe_analysis.ipynb
-```
-
-Each section is self-contained — geometry analysis requires no API keys (just sentence-transformer models). Set API keys via Colab Secrets for sections that need live search.
-
-### Modal
-
-[Modal](https://modal.com) provides programmatic GPU access. The `modal_app.py` file exposes SearchProbe analysis as remote GPU functions.
-
-```bash
-# Install Modal
-pip install "searchprobe[modal]"
-modal token set
-
-# Run geometry analysis on GPU
-modal run modal_app.py --command geometry --models "all-MiniLM-L6-v2,all-mpnet-base-v2"
-
-# Analyze specific categories
-modal run modal_app.py --command geometry --categories "negation,antonym_confusion"
-
-# Save results
-modal run modal_app.py --command geometry --output geometry_results.json
-```
-
-Use from Python:
-
-```python
-from searchprobe.compute.modal_runner import ModalRunner
-
-runner = ModalRunner()
-report = runner.geometry(models=["all-MiniLM-L6-v2"])
-embeddings = runner.encode(texts=["companies in AI", "companies NOT in AI"])
-```
+- **Judge reliability is measured, not assumed.** Run `searchprobe calibrate label` on ~200
+  pairs; `calibrate report` gives κ per constraint type. Treat judge-based numbers as
+  provisional below κ = 0.6.
+- **Uniform evidence.** The judge sees the same extracted page text for every system, never
+  provider-specific snippets (unless a page cannot be fetched, which is flagged).
+- **Infrastructure failures are not quality.** Search and judge errors are reported as error
+  rates and excluded from quality means; empty result lists count as failures.
+- **Wikidata is incomplete.** Documents outside a known answer set are judged on their content.
+- **Independence.** Aris's verifier model is configured separately from the evaluation judge.
+- **Cost.** Every stage has a budget enforced before dispatch; judgments are cached by
+  (case, content hash, judge, prompt version), so re-runs and offline scorecards are free.
 
 ## Development
 
 ```bash
-# Run tests
-pytest
-
-# Run only unit tests
-pytest tests/unit/
-
-# Run integration tests
-pytest tests/integration/
-
-# Type checking
-mypy src/searchprobe
-
-# Linting
-ruff check src/searchprobe
-
-# Format code
-ruff format src/searchprobe
+pytest                      # ~300 tests, no network or API keys needed
+ruff check src && ruff format --check src
 ```
+
+The analysis behind this redesign, and its plan, is in
+[docs/ANALYSIS_AND_PLAN.md](docs/ANALYSIS_AND_PLAN.md).
 
 ## License
 
 MIT
-
-## Acknowledgments
-
-This project was built to demonstrate understanding of neural search systems, particularly [Exa.ai](https://exa.ai)'s embedding-based search architecture. The evaluation methodology follows Exa's published approach using LLM-as-judge with pointwise scoring.

@@ -52,6 +52,9 @@ def dashboard(
         str(port),
         "--server.address",
         host,
+        # app.py has its own navigation; hide Streamlit's automatic list of pages/
+        "--client.showSidebarNavigation",
+        "false",
     ]
 
     if not browser:

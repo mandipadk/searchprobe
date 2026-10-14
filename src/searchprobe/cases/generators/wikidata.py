@@ -54,8 +54,18 @@ PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
 PREFIX mwapi: <https://www.mediawiki.org/ontology#API/>
 """
 
-# Current sovereign states (excludes dissolved ones).
-SOVEREIGN = "?item wdt:P31 wd:Q3624078 . FILTER NOT EXISTS { ?item wdt:P576 ?dissolved }"
+# Countries: UN members plus sovereign states, not dissolved. Wikidata records EU
+# membership on Denmark (Q35) and the Netherlands (Q55) rather than on their
+# kingdoms (Q756617, Q29999), so the country items are used and the kingdoms
+# excluded; otherwise Denmark would appear as a non-member of the EU.
+SOVEREIGN = (
+    "{ ?item wdt:P463 wd:Q1065 } UNION { ?item wdt:P31 wd:Q3624078 } "
+    "UNION { VALUES ?item { wd:Q35 wd:Q55 } } "
+    "FILTER(?item NOT IN (wd:Q756617, wd:Q29999)) "
+    "FILTER NOT EXISTS { ?item wdt:P576 ?dissolved } "
+    # UN membership alone also admits regime items (e.g. "Third Hellenic Republic").
+    "FILTER EXISTS { ?item wdt:P31 ?stateClass . FILTER(?stateClass IN (wd:Q6256, wd:Q3624078)) }"
+)
 
 CONTINENTS = {
     "Europe": "Q46",
@@ -66,6 +76,53 @@ CONTINENTS = {
     "Oceania": "Q55643",
 }
 EU, NATO, EURO, LANDLOCKED = "Q458", "Q7184", "Q4916", "Q123480"
+
+
+# Wikidata membership errors found by checking member counts (2026-10). Each entry is
+# (country qid, label) and is applied on top of the SPARQL membership pattern.
+MEMBERSHIP_ADD: dict[str, list[tuple[str, str]]] = {
+    "Q8908": [("Q214", "Slovakia")],  # Council of Europe member since 1993; no statement
+    "Q7785": [("Q145", "United Kingdom")],  # Commonwealth: no current statement
+}
+MEMBERSHIP_REMOVE: dict[str, list[tuple[str, str]]] = {
+    "Q7768": [("Q408", "Australia")],  # ASEAN dialogue partner, not a member
+    "Q7795": [("Q916", "Angola")],  # left OPEC in January 2024; statement has no end time
+}
+# Current members that pass SOVEREIGN, used to detect new Wikidata errors at generation.
+EXPECTED_MEMBER_COUNTS: dict[str, int] = {
+    "Q458": 27,  # EU
+    "Q7184": 32,  # NATO
+    "Q7768": 11,  # ASEAN (Timor-Leste joined 2025)
+    "Q8908": 46,  # Council of Europe
+    "Q41550": 38,  # OECD
+    "Q19771": 19,  # G20 countries (the EU and African Union are not countries)
+    "Q7785": 56,  # Commonwealth of Nations
+    "Q7795": 12,  # OPEC
+    "Q7172": 22,  # Arab League
+    "Q170481": 20,  # APEC's 21 economies minus Hong Kong
+}
+
+
+def member_of(org_qid: str) -> str:
+    """Current membership: a P463 statement without an end time (excludes the UK in the EU).
+
+    Wikidata splits some memberships between a country and its kingdom (Denmark's
+    EU membership is on Q35, its NATO membership on the Kingdom of Denmark), so
+    statements on the kingdom items count for the country items. Known Wikidata errors
+    are corrected with MEMBERSHIP_ADD / MEMBERSHIP_REMOVE.
+    """
+    pattern = (
+        "{ { ?item p:P463 ?membership . } UNION { "
+        "VALUES (?holder ?item) { (wd:Q756617 wd:Q35) (wd:Q29999 wd:Q55) } "
+        "?holder p:P463 ?membership . } "
+        f"?membership ps:P463 wd:{org_qid} . "
+        "FILTER NOT EXISTS { ?membership pq:P582 ?membershipEnd } }"
+    )
+    if add := MEMBERSHIP_ADD.get(org_qid):
+        pattern += " UNION { VALUES ?item { " + " ".join(f"wd:{q}" for q, _ in add) + " } }"
+    if remove := MEMBERSHIP_REMOVE.get(org_qid):
+        pattern += " FILTER(?item NOT IN (" + ", ".join(f"wd:{q}" for q, _ in remove) + "))"
+    return "{ " + pattern + " }"
 
 
 class WikidataClient:
@@ -236,7 +293,7 @@ async def _not_member(
 ) -> list[TestCase]:
     cq = CONTINENTS[continent]
     pattern_all = f"{SOVEREIGN} ?item wdt:P30 wd:{cq} ."
-    members = await wd.entities(f"{pattern_all} ?item wdt:P463 wd:{org_qid} .")
+    members = await wd.entities(f"{pattern_all} {member_of(org_qid)}")
     everyone = await wd.entities(pattern_all)
     member_ids = {m.qid for m in members}
     non_members = [e for e in everyone if e.qid not in member_ids]
@@ -279,7 +336,7 @@ async def _not_member(
         answer_set=members,
         negative_set=non_members,
         answer_set_complete=True,
-        provenance=_prov(pattern_all + f" ?item wdt:P463 wd:{org_qid}"),
+        provenance=_prov(pattern_all + " " + member_of(org_qid)),
         validation="auto",
     )
     return list(_link(base, twin, "negation_flip"))
@@ -326,8 +383,8 @@ async def _landlocked(wd: WikidataClient, continent: str) -> list[TestCase]:
 
 
 async def _eu_not_euro(wd: WikidataClient) -> list[TestCase]:
-    members = await wd.entities(f"{SOVEREIGN} ?item wdt:P463 wd:{EU} .")
-    euro = await wd.entities(f"{SOVEREIGN} ?item wdt:P463 wd:{EU} . ?item wdt:P38 wd:{EURO} .")
+    members = await wd.entities(f"{SOVEREIGN} {member_of(EU)}")
+    euro = await wd.entities(f"{SOVEREIGN} {member_of(EU)} ?item wdt:P38 wd:{EURO} .")
     euro_ids = {e.qid for e in euro}
     non_euro = [m for m in members if m.qid not in euro_ids]
     if not non_euro:
@@ -367,8 +424,8 @@ async def _set_difference(
     wd: WikidataClient, a: tuple[str, str], b: tuple[str, str]
 ) -> list[TestCase]:
     (a_qid, a_name), (b_qid, b_name) = a, b
-    in_a = await wd.entities(f"{SOVEREIGN} ?item wdt:P463 wd:{a_qid} .")
-    in_b = await wd.entities(f"{SOVEREIGN} ?item wdt:P463 wd:{b_qid} .")
+    in_a = await wd.entities(f"{SOVEREIGN} {member_of(a_qid)}")
+    in_b = await wd.entities(f"{SOVEREIGN} {member_of(b_qid)}")
     b_ids = {e.qid for e in in_b}
     only_a = [e for e in in_a if e.qid not in b_ids]
     both = [e for e in in_a if e.qid in b_ids]
@@ -472,9 +529,12 @@ async def _numeric_threshold(
     threshold: float,
     complete: bool = False,
     text_unit: str = "",
+    scale: float = 1.0,
 ) -> list[TestCase]:
     entities = _with_attr(
-        await wd.entities(pattern, value_expr, value_filter=f"?v > {threshold * 0.85}"), attribute
+        await wd.entities(pattern, value_expr, value_filter=f"?v > {threshold * scale * 0.85}"),
+        attribute,
+        scale,
     )
     above = [e for e in entities if e.values.get(attribute, -1) > threshold]
     near = [e for e in entities if threshold * 0.85 <= e.values.get(attribute, -1) <= threshold]
@@ -643,7 +703,7 @@ async def _landlocked_population(
 
 async def _high_capitals(wd: WikidataClient, continent: str, min_elev: float) -> list[TestCase]:
     cq = CONTINENTS[continent]
-    pattern = f"?country wdt:P31 wd:Q3624078 ; wdt:P30 wd:{cq} ; wdt:P36 ?item ."
+    pattern = f"{SOVEREIGN.replace('?item', '?country')} ?country wdt:P30 wd:{cq} ; wdt:P36 ?item ."
     entities = _with_attr(await wd.entities(pattern, ELEVATION_M), "elevation")
     ans = [e for e in entities if e.values.get("elevation", -1) > min_elev]
     low = [e for e in entities if 0 <= e.values.get("elevation", -1) <= min_elev]
@@ -690,10 +750,19 @@ FAMOUS_CITIES = {  # label -> (famous QID, country)
     "Birmingham": ("Q2256", "England"),
     "Cambridge": ("Q350", "England"),
     "Oxford": ("Q34217", "England"),
-    "Sydney": ("Q3130", "Australia"),
     "Vienna": ("Q1741", "Austria"),
     "Warsaw": ("Q270", "Poland"),
     "Delhi": ("Q1353", "India"),
+    "Venice": ("Q641", "Italy"),
+    "Lima": ("Q2868", "Peru"),
+    "Troy": ("Q22647", "Turkey"),
+    "Sparta": ("Q5690", "Greece"),
+    "Bethlehem": ("Q5776", "Palestine"),
+    "Amsterdam": ("Q727", "the Netherlands"),
+    "Hamburg": ("Q1055", "Germany"),
+    "Geneva": ("Q71", "Switzerland"),
+    "Milan": ("Q490", "Italy"),
+    "Versailles": ("Q621", "France"),
 }
 
 
@@ -761,9 +830,19 @@ RIVERS = {
     "Rhine": "Q584",
     "Mississippi River": "Q1497",
     "Amazon River": "Q3783",
-    "Elbe": "Q1676",
+    "Elbe": "Q1644",
     "Volga": "Q626",
     "Ganges": "Q5089",
+    "Nile": "Q3392",
+    "Rhône": "Q602",
+    "Mekong River": "Q41179",
+    "Yangtze River": "Q5413",
+    "Dnieper": "Q40855",
+    "Po": "Q643",
+    "Seine": "Q1471",
+    "River Thames": "Q19686",
+    "Missouri River": "Q5419",
+    "Ohio River": "Q4915",
 }
 
 
@@ -795,178 +874,301 @@ async def _tributaries(wd: WikidataClient, river: str) -> list[TestCase]:
     ]
 
 
+# Every hard-coded QID with the English label it must have. Checked against
+# Wikidata before generation so a wrong id fails loudly instead of silently
+# producing a case with the wrong answer set (this caught "Q170481", which is
+# APEC, not Mercosur).
+ORGS: dict[str, tuple[str, str]] = {  # qid -> (expected label substring, display name)
+    EU: ("European Union", "the European Union"),
+    NATO: ("NATO", "NATO"),
+    "Q7768": ("ASEAN", "ASEAN"),
+    "Q8908": ("Council of Europe", "the Council of Europe"),
+    "Q41550": ("Organization for Economic Cooperation and Development", "the OECD"),
+    "Q19771": ("G20", "the G20"),
+    "Q7785": ("Commonwealth of Nations", "the Commonwealth of Nations"),
+    "Q7795": ("Organization of the Petroleum Exporting Countries", "OPEC"),
+    "Q7172": ("Arab League", "the Arab League"),
+    "Q170481": ("Asia-Pacific Economic Cooperation", "APEC"),
+}
+EXPECTED_LABELS: dict[str, str] = {
+    **{q: v[0] for q, v in ORGS.items()},
+    # EURO (Q4916) is omitted: WDQS returns no English label for it, but it is the
+    # currency (P38) of Germany, France, etc., which is what the generator relies on.
+    LANDLOCKED: "landlocked country",
+    "Q8502": "mountain",
+    "Q11303": "skyscraper",
+    "Q4022": "river",
+    "Q23397": "lake",
+    **{q: name for name, q in CONTINENTS.items()},
+    **{
+        q: ("Nobel Peace Prize" if f == "Peace" else f"Nobel Prize in {f}")
+        for f, q in NOBEL.items()
+    },
+    **{q: name.replace(" River", "") for name, q in RIVERS.items()},
+    **{q: label for label, (q, _) in FAMOUS_CITIES.items()},
+    **{
+        q: label
+        for fixes in (MEMBERSHIP_ADD, MEMBERSHIP_REMOVE)
+        for items in fixes.values()
+        for q, label in items
+    },
+}
+
+
+async def verify_constants(wd: WikidataClient, expected: dict[str, str] | None = None) -> list[str]:
+    """Return mismatches between hard-coded QIDs and their English labels."""
+    expected = expected or EXPECTED_LABELS
+    values = " ".join(f"wd:{q}" for q in expected)
+    rows = await wd.select(
+        f"""SELECT ?item ?itemLabel WHERE {{ VALUES ?item {{ {values} }}
+            SERVICE wikibase:label {{ bd:serviceParam wikibase:language "en". }} }}"""
+    )
+    labels = {r["item"].rsplit("/", 1)[-1]: r.get("itemLabel", "") for r in rows}
+    problems = []
+    for qid, want in expected.items():
+        got = labels.get(qid, "")
+        if want.lower() not in got.lower():
+            problems.append(f"{qid}: expected label containing {want!r}, Wikidata has {got!r}")
+    return problems
+
+
+async def verify_memberships(
+    wd: WikidataClient, expected: dict[str, int] | None = None
+) -> list[str]:
+    """Return organizations whose (corrected) current member count is not the expected one."""
+    expected = expected or EXPECTED_MEMBER_COUNTS
+    problems = []
+    for org, want in expected.items():
+        rows = await wd.select(
+            f"SELECT (COUNT(DISTINCT ?item) AS ?n) WHERE {{ {SOVEREIGN} {member_of(org)} }}"
+        )
+        got = int(rows[0]["n"]) if rows else 0
+        if got != want:
+            problems.append(f"{org}: expected {want} current members, Wikidata gives {got}")
+    return problems
+
+
 def default_specs() -> list[GeneratorSpec]:
     """The generator catalogue used to build the shipped dataset."""
     specs: list[GeneratorSpec] = []
-    for cont, org, name in [
-        ("Europe", EU, "the European Union"),
-        ("Europe", NATO, "NATO"),
-        ("Africa", "Q7159", "the African Union"),
-        ("Asia", "Q7768", "ASEAN"),
-        ("South America", "Q170481", "Mercosur"),
+
+    def add(name: str, category: str, fn: Callable[[WikidataClient], Awaitable[list[TestCase]]]):
+        specs.append(GeneratorSpec(name, category, fn))
+
+    # Negation: "<continent> countries that are not members of <org>" (+ twin).
+    for cont, org in [
+        ("Europe", EU),
+        ("Europe", NATO),
+        ("Europe", "Q8908"),
+        ("Europe", "Q41550"),
+        ("Asia", "Q7768"),
+        ("Asia", "Q7172"),
+        ("Asia", "Q41550"),
+        ("Asia", "Q7785"),
+        ("Asia", "Q7795"),
+        ("Africa", "Q7785"),
+        ("Africa", "Q7172"),
+        ("Africa", "Q7795"),
+        ("South America", "Q41550"),
+        ("North America", "Q41550"),
+        ("Oceania", "Q7785"),
+        ("Asia", "Q170481"),
     ]:
-        specs.append(
-            GeneratorSpec(
-                f"not_member:{cont}:{org}",
-                "negation",
-                lambda wd, c=cont, o=org, n=name: _not_member(wd, c, o, n),
-            )
+        add(
+            f"not_member:{cont}:{org}",
+            "negation",
+            lambda wd, c=cont, o=org: _not_member(wd, c, o, ORGS[o][1]),
         )
-    for cont in ("Africa", "Asia", "Europe", "South America"):
-        specs.append(
-            GeneratorSpec(f"landlocked:{cont}", "negation", lambda wd, c=cont: _landlocked(wd, c))
-        )
-    specs.append(GeneratorSpec("eu_not_euro", "negation", _eu_not_euro))
+    for cont in ("Africa", "Asia", "Europe"):  # South America has only two
+        add(f"landlocked:{cont}", "negation", lambda wd, c=cont: _landlocked(wd, c))
+    add("eu_not_euro", "negation", _eu_not_euro)
+
+    # Boolean: set differences between organizations.
     for a, b in [
-        ((NATO, "NATO"), (EU, "the European Union")),
-        ((EU, "the European Union"), (NATO, "NATO")),
-        (
-            ("Q8908", "the Commonwealth of Nations"),
-            ("Q1065", "the United Nations Security Council"),
-        ),
+        (NATO, EU),
+        (EU, NATO),
+        ("Q41550", EU),
+        (EU, "Q41550"),
+        ("Q19771", "Q41550"),
+        ("Q41550", "Q19771"),
+        ("Q8908", EU),
+        ("Q7795", "Q7172"),
+        ("Q7172", "Q7795"),
+        ("Q7785", "Q19771"),
+        ("Q170481", "Q41550"),
     ]:
-        specs.append(
-            GeneratorSpec(
-                f"difference:{a[0]}:{b[0]}",
-                "boolean_logic",
-                lambda wd, a=a, b=b: _set_difference(wd, a, b),
-            )
+        add(
+            f"difference:{a}:{b}",
+            "boolean_logic",
+            lambda wd, a=a, b=b: _set_difference(wd, (a, ORGS[a][1]), (b, ORGS[b][1])),
         )
 
-    for lo, hi in [(1e6, 2e6), (5e6, 6e6), (2e7, 3e7)]:
-        specs.append(
-            GeneratorSpec(
-                f"population:{lo:g}-{hi:g}",
-                "numeric_precision",
-                lambda wd, lo=lo, hi=hi: _numeric_range(
-                    wd,
-                    pattern=SOVEREIGN,
-                    value_expr=POPULATION,
-                    attribute="population",
-                    unit="people",
-                    noun="Countries",
-                    lo=lo,
-                    hi=hi,
-                ),
-            )
+    # Numeric ranges (x10 twins chosen so no twin duplicates another base case).
+    for lo, hi in [(1e6, 2e6), (3e6, 4e6), (5e6, 6e6), (7e6, 8e6), (2e6, 2.5e6)]:
+        add(
+            f"population:{lo:g}-{hi:g}",
+            "numeric_precision",
+            lambda wd, lo=lo, hi=hi: _numeric_range(
+                wd,
+                pattern=SOVEREIGN,
+                value_expr=POPULATION,
+                attribute="population",
+                unit="people",
+                noun="Countries",
+                lo=lo,
+                hi=hi,
+            ),
         )
-    for lo, hi in [(10_000, 20_000), (100_000, 120_000)]:
-        specs.append(
-            GeneratorSpec(
-                f"area:{lo}-{hi}",
-                "numeric_precision",
-                lambda wd, lo=lo, hi=hi: _numeric_range(
-                    wd,
-                    pattern=SOVEREIGN,
-                    value_expr=AREA_KM2,
-                    attribute="area",
-                    unit="km²",
-                    noun="Countries",
-                    lo=lo,
-                    hi=hi,
-                    scale=1e6,
-                    text_unit=" square kilometers",
-                ),
-            )
+    for lo, hi in [(10_000, 20_000), (30_000, 40_000), (50_000, 60_000), (2_000, 5_000)]:
+        add(
+            f"area:{lo}-{hi}",
+            "numeric_precision",
+            lambda wd, lo=lo, hi=hi: _numeric_range(
+                wd,
+                pattern=SOVEREIGN,
+                value_expr=AREA_KM2,
+                attribute="area",
+                unit="km²",
+                noun="Countries",
+                lo=lo,
+                hi=hi,
+                scale=1e6,
+                text_unit=" square kilometers",
+            ),
         )
-    specs.append(
-        GeneratorSpec(
+    thresholds = [
+        (
             "eight_thousanders",
-            "numeric_precision",
-            lambda wd: _numeric_threshold(
-                wd,
-                pattern="?item wdt:P31 wd:Q8502 .",
-                value_expr=ELEVATION_M,
-                attribute="elevation",
-                unit="m",
-                noun="Mountains",
-                threshold=8000,
-                complete=True,
-                text_unit=" meters",
-            ),
-        )
-    )
-    specs.append(
-        GeneratorSpec(
+            "?item wdt:P31 wd:Q8502 .",
+            ELEVATION_M,
+            "elevation",
+            "m",
+            "Mountains",
+            8000,
+            True,
+            " meters",
+            1.0,
+        ),
+        (
             "skyscrapers_500m",
-            "numeric_precision",
-            lambda wd: _numeric_threshold(
-                wd,
-                pattern="?item wdt:P31 wd:Q11303 .",
-                value_expr=HEIGHT_M,
-                attribute="height",
-                unit="m",
-                noun="Skyscrapers",
-                threshold=500,
-                text_unit=" meters",
-            ),
-        )
-    )
-    specs.append(
-        GeneratorSpec(
+            "?item wdt:P31 wd:Q11303 .",
+            HEIGHT_M,
+            "height",
+            "m",
+            "Skyscrapers",
+            500,
+            False,
+            " meters",
+            1.0,
+        ),
+        (
+            "skyscrapers_400m",
+            "?item wdt:P31 wd:Q11303 .",
+            HEIGHT_M,
+            "height",
+            "m",
+            "Skyscrapers",
+            400,
+            False,
+            " meters",
+            1.0,
+        ),
+        (
             "rivers_4000km",
+            "?item wdt:P31 wd:Q4022 .",
+            LENGTH_M,
+            "length",
+            "km",
+            "Rivers",
+            4000,
+            False,
+            " kilometers",
+            1000.0,
+        ),
+        (
+            "lakes_20000km2",
+            "?item wdt:P31 wd:Q23397 .",
+            AREA_KM2,
+            "area",
+            "km²",
+            "Lakes",
+            20000,
+            False,
+            " square kilometers",
+            1e6,
+        ),
+    ]
+    for name, pattern, expr, attr, unit, noun, thr, complete, text_unit, scale in thresholds:
+        add(
+            name,
             "numeric_precision",
-            lambda wd: _numeric_threshold(
-                wd,
-                pattern="?item wdt:P31 wd:Q4022 .",
-                value_expr=LENGTH_M,
-                attribute="length",
-                unit="m",
-                noun="Rivers",
-                threshold=4_000_000,
-                text_unit=" meters",
+            lambda wd, p=pattern, e=expr, a=attr, u=unit, n=noun, t=thr, c=complete, tu=text_unit, sc=scale: (
+                _numeric_threshold(
+                    wd,
+                    pattern=p,
+                    value_expr=e,
+                    attribute=a,
+                    unit=u,
+                    noun=n,
+                    threshold=t,
+                    complete=c,
+                    text_unit=tu,
+                    scale=sc,
+                )
             ),
         )
-    )
 
+    # Temporal: Nobel laureates by year (twins are the previous year; years are
+    # spaced so no twin duplicates a base case) and independence years.
     for field in NOBEL:
-        for year in (2018, 2021, 2023):
-            specs.append(
-                GeneratorSpec(
-                    f"nobel:{field}:{year}",
-                    "temporal_constraint",
-                    lambda wd, f=field, y=year: _nobel_year(wd, f, y),
-                )
-            )
-    for year in (1960, 1991, 1993):
-        specs.append(
-            GeneratorSpec(
-                f"independence:{year}",
+        for year in (2015, 2017, 2019, 2021, 2023):
+            add(
+                f"nobel:{field}:{year}",
                 "temporal_constraint",
-                lambda wd, y=year: _independence_year(wd, y),
+                lambda wd, f=field, y=year: _nobel_year(wd, f, y),
             )
+    for year in (1960, 1962, 1966, 1971, 1975, 1991, 1993):
+        add(
+            f"independence:{year}",
+            "temporal_constraint",
+            lambda wd, y=year: _independence_year(wd, y),
         )
 
-    for cont, pop in [("Europe", 5e6), ("Africa", 2e7), ("Asia", 1e7), ("South America", 5e6)]:
-        specs.append(
-            GeneratorSpec(
-                f"landlocked_pop:{cont}",
-                "multi_constraint",
-                lambda wd, c=cont, p=pop: _landlocked_population(wd, c, p),
-            )
+    # Multi-constraint.
+    for cont, pop in [
+        ("Europe", 5e6),
+        ("Europe", 1e7),
+        ("Africa", 2e7),
+        ("Africa", 1e7),
+        ("Asia", 1e7),
+    ]:
+        add(
+            f"landlocked_pop:{cont}:{pop:g}",
+            "multi_constraint",
+            lambda wd, c=cont, p=pop: _landlocked_population(wd, c, p),
         )
-    for cont, elev in [("South America", 2000), ("Africa", 1000), ("Asia", 1000)]:
-        specs.append(
-            GeneratorSpec(
-                f"high_capitals:{cont}",
-                "multi_constraint",
-                lambda wd, c=cont, e=elev: _high_capitals(wd, c, e),
-            )
+    for cont, elev in [
+        ("South America", 2000),
+        ("Africa", 1000),
+        ("Asia", 1000),
+        ("Europe", 500),
+        ("North America", 1000),
+    ]:
+        add(
+            f"high_capitals:{cont}",
+            "multi_constraint",
+            lambda wd, c=cont, e=elev: _high_capitals(wd, c, e),
         )
+
+    # Entity disambiguation and compositional.
     for label in FAMOUS_CITIES:
-        specs.append(
-            GeneratorSpec(
-                f"namesake:{label}",
-                "entity_disambiguation",
-                lambda wd, lb=label: _namesake_cities(wd, lb),
-            )
+        add(
+            f"namesake:{label}",
+            "entity_disambiguation",
+            lambda wd, lb=label: _namesake_cities(wd, lb),
         )
     for river in RIVERS:
-        specs.append(
-            GeneratorSpec(
-                f"tributaries:{river}", "compositional", lambda wd, r=river: _tributaries(wd, r)
-            )
-        )
+        add(f"tributaries:{river}", "compositional", lambda wd, r=river: _tributaries(wd, r))
     return specs
 
 
@@ -995,6 +1197,17 @@ async def generate(
             on_progress(spec.name, len(produced))
 
     try:
+        problems = await verify_constants(wd)
+        if problems:
+            raise RuntimeError(
+                "Hard-coded Wikidata ids do not match their labels:\n  " + "\n  ".join(problems)
+            )
+        problems = await verify_memberships(wd)
+        if problems:
+            raise RuntimeError(
+                "Membership data disagrees with known member counts (update MEMBERSHIP_ADD/"
+                "MEMBERSHIP_REMOVE or EXPECTED_MEMBER_COUNTS):\n  " + "\n  ".join(problems)
+            )
         await asyncio.gather(*[_run(spec) for spec in specs])
     finally:
         if client is None:

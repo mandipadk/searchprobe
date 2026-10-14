@@ -199,7 +199,7 @@ def _sparql_transport():
 
     def handler(request: httpx.Request) -> httpx.Response:
         query = dict(httpx.QueryParams(request.content.decode()))["query"]
-        rows = members if "P463" in query else all_rows
+        rows = members if "ps:P463 wd:Q458" in query else all_rows
         return httpx.Response(200, json={"results": {"bindings": rows}})
 
     return httpx.MockTransport(handler)
@@ -218,3 +218,49 @@ def test_wikidata_not_member_builds_case_and_twin_with_answer_sets():
     assert base.twins["negation_flip"] == twin.id
     assert {e.label for e in twin.answer_set} == {"France", "Germany", "Spain"}
     assert json.loads(base.model_dump_json())["provenance"]["generator"] == "wikidata"
+
+
+def test_verify_constants_flags_wrong_ids():
+    from searchprobe.cases.generators.wikidata import verify_constants
+
+    def handler(request):
+        rows = [{"item": {"value": "http://www.wikidata.org/entity/Q170481"},
+                 "itemLabel": {"value": "Asia-Pacific Economic Cooperation"}}]
+        return httpx.Response(200, json={"results": {"bindings": rows}})
+
+    async def go():
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
+            return await verify_constants(WikidataClient(client=http), {"Q170481": "Mercosur"})
+
+    (problem,) = asyncio.run(go())
+    assert "Q170481" in problem and "Mercosur" in problem
+
+
+def test_membership_excludes_ended_memberships():
+    from searchprobe.cases.generators.wikidata import member_of
+
+    pattern = member_of("Q458")
+    assert "pq:P582" in pattern and "FILTER NOT EXISTS" in pattern
+    assert "wd:Q756617 wd:Q35" in pattern  # kingdom-held memberships count for the country
+
+
+def test_membership_corrections_are_applied():
+    from searchprobe.cases.generators.wikidata import member_of
+
+    assert "wd:Q214" in member_of("Q8908")  # Slovakia added to the Council of Europe
+    assert "NOT IN (wd:Q408)" in member_of("Q7768")  # Australia removed from ASEAN
+    assert "NOT IN" not in member_of("Q458")
+
+
+def test_verify_memberships_flags_wrong_counts():
+    from searchprobe.cases.generators.wikidata import verify_memberships
+
+    def handler(request):
+        return httpx.Response(200, json={"results": {"bindings": [{"n": {"value": "26"}}]}})
+
+    async def go():
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
+            return await verify_memberships(WikidataClient(client=http), {"Q458": 27})
+
+    (problem,) = asyncio.run(go())
+    assert "Q458" in problem and "27" in problem and "26" in problem
