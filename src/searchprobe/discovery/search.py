@@ -100,7 +100,11 @@ class CaseEvaluator:
             self.budget_exhausted = True
         return r
 
-    async def _system_metrics(self, system: str, case: TestCase) -> ListMetrics | None:
+    async def _system_judgments(
+        self, system: str, case: TestCase
+    ) -> tuple[list, str | None] | None:
+        """One system's top-k judgments (None where unjudged) and its search error;
+        None if the search itself could not be reserved."""
         from searchprobe.judging.checkers import run_checkers
         from searchprobe.judging.engine import checker_only_judgment
         from searchprobe.judging.llm_judge import evidence_from
@@ -116,7 +120,7 @@ class CaseEvaluator:
         if self.cost_tracker is not None:
             self.cost_tracker.commit(reservation, system, "discovery", resp.cost_usd)
         if resp.error:
-            return list_metrics(case, system, [], [], k=self.k, error=resp.error)
+            return [], resp.error
         urls = [str(r.url) for r in resp.results[: self.k]]
         snaps = await self.fetcher.fetch_many(urls) if self.fetcher else {}
         judgments = []
@@ -141,12 +145,30 @@ class CaseEvaluator:
                 if self.cost_tracker is not None:
                     self.cost_tracker.commit(reservation, "judge", "discovery", j.cost_usd)
             judgments.append(j)
-        pool = [j for j in judgments if j is not None]
-        return list_metrics(case, system, judgments, pool, k=self.k)
+        return judgments, None
 
     async def evaluate(self, case: TestCase) -> Evaluation:
-        target = await self._system_metrics(self.target, case)
-        reference = await self._system_metrics(self.reference, case) if self.reference else None
+        systems = [self.target] + ([self.reference] if self.reference else [])
+        judged = {s: await self._system_judgments(s, case) for s in systems}
+        # nDCG of both systems is normalized against the same pooled ideal ranking.
+        pool = list(
+            {
+                j.content_hash: j
+                for result in judged.values()
+                if result is not None
+                for j in result[0]
+                if j is not None
+            }.values()
+        )
+
+        def metrics(system: str | None) -> ListMetrics | None:
+            result = judged.get(system) if system else None
+            if result is None:
+                return None
+            judgments, error = result
+            return list_metrics(case, system, judgments, pool, k=self.k, error=error)
+
+        target, reference = metrics(self.target), metrics(self.reference)
         if target is None or target.violation_at_k is None:
             return Evaluation(0.0, target, reference, False)
         if self.reference is None:

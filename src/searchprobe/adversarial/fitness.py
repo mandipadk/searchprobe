@@ -215,7 +215,7 @@ class FitnessEvaluator:
             response = await self.provider.search(request)
             self._add_cost(response.cost_usd)
 
-            if response.error:
+            if response.error or not response.results:  # nothing to measure a gap on
                 return self._failed()
 
             results_dicts = [

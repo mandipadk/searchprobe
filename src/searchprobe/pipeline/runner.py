@@ -215,10 +215,18 @@ class BenchmarkRunner:
                 return response
 
         status = "failed"
+        running = [asyncio.create_task(execute_task(t)) for t in tasks]
         try:
-            task_results = await asyncio.gather(*[execute_task(t) for t in tasks])
+            task_results = await asyncio.gather(*running)
             results = [r for r in task_results if r is not None]
             status = "partial" if skipped_for_budget else "completed"
+        except BaseException:
+            # Stop and drain the siblings before the run is closed, so no search is
+            # dispatched or costed after complete_run.
+            for task in running:
+                task.cancel()
+            await asyncio.gather(*running, return_exceptions=True)
+            raise
         finally:  # the run is closed and providers released even if a task raises
             self.db.complete_run(
                 run_id,

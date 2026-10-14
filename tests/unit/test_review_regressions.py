@@ -10,6 +10,7 @@ from searchprobe.adversarial.fitness import FitnessEvaluator
 from searchprobe.adversarial.models import Individual
 from searchprobe.cases.models import (
     DateConstraint,
+    ExcludeConstraint,
     KnownEntity,
     NumericConstraint,
     TestCase,
@@ -631,3 +632,90 @@ def test_candidates_evaluated_past_the_budget_are_not_admitted():
                     constraints=[TopicConstraint(id="c1", subject="a company")])
     result = asyncio.run(discover([case], Evaluator(), iterations=5, reevaluate=0))
     assert result.archive.elites() == []
+
+
+# --- sixth review round -------------------------------------------------------------
+
+
+def test_cross_encoder_fitness_with_no_results_is_not_cached():
+    class Provider:
+        calls = 0
+
+        async def search(self, request):
+            Provider.calls += 1
+            return SearchResponse(provider="p", query=request.query)
+
+    class CrossEncoder:
+        def validate_search_results(self, **kw):  # an empty list scores a 0.0 gap
+            class V:
+                ndcg_improvement = 0.0
+
+            return V()
+
+    ev = FitnessEvaluator(mode="cross_encoder", provider=Provider(), cross_encoder=CrossEncoder())
+    for _ in range(2):
+        asyncio.run(ev.evaluate_population([Individual(query="q")]))
+    assert Provider.calls == 2
+
+
+def test_discovery_ndcg_uses_one_pool_for_target_and_reference():
+    from searchprobe.discovery.search import CaseEvaluator
+
+    case = TestCase(
+        text="European countries that are not EU members", category="negation",
+        constraints=[TopicConstraint(id="c1", subject="a European country"),
+                     ExcludeConstraint(id="c2", concept="an EU member")])
+
+    class Judge:
+        model = "m"
+
+        async def judge(self, case, evidence, decided=None):
+            from searchprobe.judging.models import ConstraintVerdict, DocJudgment
+
+            rel = 3 if "Norway" in evidence.url else 1
+            return DocJudgment(case_id=case.id, content_hash=evidence.url, url=evidence.url,
+                               judge_id="j", prompt_version="v", relevance=rel,
+                               verdicts=[ConstraintVerdict(constraint_id=c.id, verdict="satisfied",
+                                                           source="llm") for c in case.constraints],
+                               evidence_source="snippet")
+
+    providers = {"t": FakeProvider(lambda q: ["https://travel.example/Iceland"], name="t"),
+                 "r": FakeProvider(lambda q: ["https://travel.example/Norway"], name="r")}
+    ev = CaseEvaluator(providers, "t", "r", judge=Judge(), k=1)
+    result = asyncio.run(ev.evaluate(case))
+    # The target's lower-gain document is measured against the reference's better one.
+    assert result.target.ndcg_at_k < 1.0
+    assert result.reference.ndcg_at_k == pytest.approx(1.0)
+
+
+def test_runner_stops_sibling_searches_before_closing_the_run(tmp_path, monkeypatch):
+    from searchprobe.pipeline.runner import BenchmarkConfig, BenchmarkRunner
+    from searchprobe.providers import registry
+    from searchprobe.storage import Database
+
+    fake = FakeProvider(lambda q: ["https://a.example/"], name="brave", delay=0.05)
+    monkeypatch.setattr(registry.ProviderRegistry, "get_provider",
+                        classmethod(lambda cls, name, settings=None: fake))
+    db = Database(str(tmp_path / "db.sqlite"))
+    qs = db.create_query_set(name="t")
+    for i in range(6):
+        db.add_query(qs, f"q{i}", "negation")
+    runner = BenchmarkRunner(BenchmarkConfig(providers=["brave"], max_concurrent=1),
+                             settings=Settings(_env_file=None), db=db)
+    calls = []
+
+    def progress(message, done, total):
+        calls.append(done)
+        raise RuntimeError("progress display crashed")
+
+    runner._progress_callback = progress
+
+    async def go():
+        with pytest.raises(RuntimeError):
+            await runner.run(db.get_queries(query_set_id=qs))
+        searches_at_close = len(fake.calls)
+        await asyncio.sleep(0.2)
+        return searches_at_close
+
+    at_close = asyncio.run(go())
+    assert len(fake.calls) == at_close  # nothing ran after the run was closed
