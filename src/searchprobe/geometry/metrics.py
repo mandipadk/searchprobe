@@ -65,11 +65,12 @@ def local_intrinsic_dimensionality(
     Returns:
         MLE estimate of local intrinsic dimensionality
     """
-    from sklearn.neighbors import NearestNeighbors
-
     n_samples = embeddings.shape[0]
     if n_samples < max(min_samples, 3 * k):
         return float("nan")
+
+    from sklearn.neighbors import NearestNeighbors  # optional "analysis" dependency
+
     if n_samples < k + 1:
         k = max(1, n_samples - 1)
 
