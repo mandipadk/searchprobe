@@ -53,7 +53,9 @@ def label(
 
     settings = get_settings()
     _, judgments, cases, labels = _load(settings, judge_id)
-    done = labels.labeled_pairs(labeler)
+    # Only pairs of the judgments being calibrated count toward the target.
+    current = {(j.case_id, j.content_hash) for j in judgments if j.case_id in cases}
+    done = labels.labeled_pairs(labeler) & current
     remaining = max(0, n - len(done))
     if remaining == 0:
         console.print(f"[green]{len(done)} pairs already labeled by {labeler}.[/green]")
@@ -73,6 +75,9 @@ def label(
                 title=f"Pair {i}/{len(items)} ({len(done) + i - 1} labeled so far)",
             )
         )
+        # Answers are saved only once the whole pair (every constraint and relevance)
+        # is labeled, so a pair is never left half-labeled.
+        answers: dict[str, str] = {}
         skip = False
         for c in case.constraints:
             while True:
@@ -80,13 +85,13 @@ def label(
                     typer.prompt(f"  {c.id} [{c.type}] {c.describe()}  (s/v/u/k/q)").strip().lower()
                 )
                 if ans in keymap:
-                    labels.put(case.id, j.content_hash, c.id, keymap[ans], labeler)
+                    answers[c.id] = keymap[ans]
                     break
                 if ans == "k":
                     skip = True
                     break
                 if ans == "q":
-                    console.print("[yellow]Stopped. Progress saved.[/yellow]")
+                    console.print("[yellow]Stopped. Completed pairs are saved.[/yellow]")
                     return
             if skip:
                 break
@@ -95,8 +100,10 @@ def label(
         while True:
             rel = typer.prompt("  Relevance 0-3 (0 unrelated ... 3 fully answers)").strip()
             if rel in {"0", "1", "2", "3"}:
-                labels.put(case.id, j.content_hash, RELEVANCE_KEY, rel, labeler)
+                answers[RELEVANCE_KEY] = rel
                 break
+        for key, value in answers.items():
+            labels.put(case.id, j.content_hash, key, value, labeler)
     console.print("[green]Done.[/green] Run `searchprobe calibrate report`.")
 
 

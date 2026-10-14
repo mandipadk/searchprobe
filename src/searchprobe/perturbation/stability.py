@@ -87,6 +87,13 @@ def rank_biased_overlap(
     return float(min(1.0, max(0.0, rbo)))
 
 
+# Exact names only: a prefix match on "ref" would also drop content-selecting
+# parameters such as ?reference=2.
+_TRACKING_PARAMS = frozenset(
+    {"ref", "ref_src", "ref_url", "referrer", "fbclid", "gclid", "msclkid", "mc_cid", "mc_eid"}
+)
+
+
 def normalize_url(url: str) -> str:
     """Normalize a URL for result-set comparison.
 
@@ -103,7 +110,7 @@ def normalize_url(url: str) -> str:
         [
             (k, v)
             for k, v in parse_qsl(parts.query, keep_blank_values=True)
-            if not k.lower().startswith(("utm_", "ref", "fbclid", "gclid"))
+            if not (k.lower().startswith("utm_") or k.lower() in _TRACKING_PARAMS)
         ]
     )
     path = parts.path.rstrip("/") or "/"

@@ -107,7 +107,7 @@ def batch_validate(
             item["query_text"],
             item.get("category", "unknown"),
             item.get("provider", "unknown"),
-            item["results"],
+            item.get("results", []),
         )
         out.append({**v.to_dict(), "query_text": item["query_text"]})
     return out

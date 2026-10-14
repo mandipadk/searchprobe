@@ -20,6 +20,7 @@ from datetime import date
 from searchprobe.cases.models import (
     DateConstraint,
     ExcludeConstraint,
+    FreeformConstraint,
     NumericConstraint,
     RelationConstraint,
     TestCase,
@@ -62,13 +63,25 @@ ANTONYMS: dict[str, str] = {
 ANTONYMS.update({v: k for k, v in list(ANTONYMS.items()) if v not in ANTONYMS})
 
 
-def _derive(base: TestCase, text: str, constraints: list, relation: str) -> TestCase:
+def _derive(base: TestCase, text: str, constraints: list, relation: str) -> TestCase | None:
+    """Build the twin. Free-text requirements that quote the base query are rewritten
+    for the twin's query; any other free-text requirement cannot be updated
+    mechanically, so the transform is rejected rather than left contradictory."""
+    updated = []
+    for c in constraints:
+        if isinstance(c, FreeformConstraint) and text not in c.requirement:
+            if base.text not in c.requirement:
+                return None
+            c = c.model_copy(
+                update={"requirement": c.requirement.replace(base.text, text), "description": ""}
+            )
+        updated.append(c)
     return TestCase(
         text=text,
         category=base.category,
         operators=base.operators,
         difficulty=base.difficulty,
-        constraints=constraints,
+        constraints=updated,
         twin_of=base.id,
         twin_relation=relation,
         provenance=base.provenance.model_copy(update={"notes": f"twin ({relation}) of {base.id}"}),
@@ -79,7 +92,7 @@ def _derive(base: TestCase, text: str, constraints: list, relation: str) -> Test
 def negation_flip(case: TestCase) -> TestCase | None:
     """Remove the negation: 'companies that are NOT in AI' -> 'companies that are in AI'."""
     excludes = [c for c in case.constraints if isinstance(c, ExcludeConstraint)]
-    if not excludes:
+    if len(excludes) != 1:  # one negation is removed from the text, so one exclusion flips
         return None
     for pattern, repl in _NEGATION_REMOVALS:
         new_text, n = pattern.subn(repl, case.text, count=1)
@@ -115,28 +128,33 @@ def numeric_scale(case: TestCase, factor: float = 10.0) -> TestCase | None:
     if len(nums) != 1:
         return None
     c = nums[0]
-    text = case.text
-    replaced = 0
+    # Locate every bound in the *original* text, then replace all spans at once, so a
+    # replaced bound is never matched again ("between 10 and 100" x10 must become
+    # "between 100 and 1,000", not "between 1,000 and 100").
+    spans: list[tuple[int, int, str]] = []
     for value in (c.value, c.value_max):
         if value is None:
             continue
-        for rendered in {
+        renderings = {
             _fmt_number(value),
             f"{value:g}",
             str(int(value)) if value.is_integer() else "",
-        }:
-            if rendered and re.search(rf"(?<![\d.,]){re.escape(rendered)}(?![\d.,])", text):
-                text = re.sub(
-                    rf"(?<![\d.,]){re.escape(rendered)}(?![\d.,])",
-                    _fmt_number(value * factor),
-                    text,
-                    count=1,
-                )
-                replaced += 1
+        }
+        taken = {(a, b) for a, b, _ in spans}
+        match = None
+        for rendered in sorted(r for r in renderings if r):
+            for m in re.finditer(rf"(?<![\d.,]){re.escape(rendered)}(?![\d.,])", case.text):
+                if (m.start(), m.end()) not in taken:
+                    match = m
+                    break
+            if match:
                 break
-    expected = 2 if c.value_max is not None else 1
-    if replaced != expected:
-        return None
+        if match is None:
+            return None
+        spans.append((match.start(), match.end(), _fmt_number(value * factor)))
+    text = case.text
+    for start, end, new in sorted(spans, reverse=True):
+        text = text[:start] + new + text[end:]
     new_c = c.model_copy(
         update={
             "value": c.value * factor,
@@ -191,7 +209,9 @@ def argument_swap(case: TestCase) -> TestCase | None:
         return None
     c = rels[0]
     text = case.text
-    if c.subject not in text or c.object not in text or c.subject == c.object:
+    if c.subject not in text or c.object not in text:
+        return None
+    if c.subject in c.object or c.object in c.subject:  # "York" vs "New York"
         return None
     placeholder = "\x00"
     text = text.replace(c.subject, placeholder).replace(c.object, c.subject)

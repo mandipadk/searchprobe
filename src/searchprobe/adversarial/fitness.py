@@ -9,6 +9,9 @@ from searchprobe.adversarial.models import Individual
 # Spend of the evaluation running in the current asyncio task. Population members are
 # evaluated concurrently, so a per-instance attribute would mix their costs.
 _task_cost: ContextVar[float] = ContextVar("fitness_task_cost", default=0.0)
+# Set when the current task's evaluation hit an infrastructure failure: its 0.0 is
+# not a measurement and must not be cached.
+_task_failed: ContextVar[bool] = ContextVar("fitness_task_failed", default=False)
 
 
 class FitnessEvaluator:
@@ -83,8 +86,10 @@ class FitnessEvaluator:
 
         def cache_key(ind: Individual) -> str:
             query = " ".join(ind.query.lower().split())
-            # Heuristic fitness also depends on mutation depth, so it is part of the key.
-            return query if live else f"{query}|{len(ind.mutation_history)}"
+            if not live:  # heuristic fitness also depends on mutation depth
+                return f"{query}|{len(ind.mutation_history)}"
+            # The judge scores with category-specific dimensions and weights.
+            return f"{query}|{ind.category}" if self.mode == "llm_judge" else query
 
         async def _one(ind: Individual) -> None:
             key = cache_key(ind)
@@ -105,11 +110,12 @@ class FitnessEvaluator:
                         if reservation is None:
                             self.budget_exhausted = True
                             return
-                    fitness, cost = await self._evaluate_with_cost(ind)
+                    fitness, cost, failed = await self._evaluate_with_cost(ind)
                     if self.cost_tracker is not None:
                         self.cost_tracker.commit(reservation, "evolution", self.mode, cost)
                     self.total_cost += cost
-                self._cache[key] = fitness
+                if not failed:  # a transient failure is retried in a later generation
+                    self._cache[key] = fitness
             finally:
                 ind.fitness = fitness
                 future.set_result(fitness)
@@ -130,10 +136,17 @@ class FitnessEvaluator:
             cost += 0.02  # conservative per-judgment estimate
         return cost
 
-    async def _evaluate_with_cost(self, individual: Individual) -> tuple[float, float]:
+    async def _evaluate_with_cost(self, individual: Individual) -> tuple[float, float, bool]:
+        """Fitness, this evaluation's cost, and whether it failed for infrastructure reasons."""
         _task_cost.set(0.0)
+        _task_failed.set(False)
         fitness = await self.evaluate(individual)
-        return fitness, _task_cost.get()
+        return fitness, _task_cost.get(), _task_failed.get()
+
+    @staticmethod
+    def _failed() -> float:
+        _task_failed.set(True)
+        return 0.0
 
     @staticmethod
     def _add_cost(cost: float) -> None:
@@ -157,7 +170,7 @@ class FitnessEvaluator:
             self._add_cost(response.cost_usd)
 
             if response.error:
-                return 0.0  # infrastructure failure is not an adversarial success
+                return self._failed()  # infrastructure failure is not an adversarial success
 
             evaluation = await self.judge.evaluate(
                 query_id=individual.id,
@@ -168,12 +181,12 @@ class FitnessEvaluator:
 
             self._add_cost(getattr(evaluation, "cost_usd", 0.0))
             if not evaluation.counts_for_quality:
-                return 0.0
+                return self._failed()
             # Fitness = 1 - score (lower relevance = higher adversarial fitness)
             return 1.0 - evaluation.weighted_score
 
         except Exception:
-            return 0.0  # evaluation error: not evidence of an adversarial query
+            return self._failed()  # evaluation error: not evidence of an adversarial query
 
     async def _evaluate_cross_encoder(self, individual: Individual) -> float:
         """Evaluate using cross-encoder gap."""
@@ -193,7 +206,7 @@ class FitnessEvaluator:
             self._add_cost(response.cost_usd)
 
             if response.error:
-                return 0.0
+                return self._failed()
 
             results_dicts = [
                 {
@@ -217,7 +230,7 @@ class FitnessEvaluator:
             return min(1.0, validation.ndcg_improvement * 2)
 
         except Exception:
-            return 0.0  # evaluation error: not evidence of an adversarial query
+            return self._failed()  # evaluation error: not evidence of an adversarial query
 
     def _evaluate_embedding_sim(self, individual: Individual) -> float:
         """Structural heuristic ("heuristic"/legacy "embedding_sim" mode).

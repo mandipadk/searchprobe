@@ -282,20 +282,193 @@ def test_calibration_samples_each_pair_once_and_refuses_mixed_judges():
         agreement_report({}, judgments, {case.id: case})
 
 
-def test_index_fetch_refuses_redirects_to_private_hosts():
+def _web(handler, addresses):
     from aris.sources.web import WebSource
 
-    def handler(request):
-        if request.url.host == "public.example":
-            return httpx.Response(302, headers={"location": "http://127.0.0.1/admin"})
-        return httpx.Response(200, text="<title>secret</title>internal")
-
-    web = WebSource(url_guard=lambda u: "127.0.0.1" not in u)
+    web = WebSource(public_only=True, resolve=lambda host: addresses[host])
     web._client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    return web
+
+
+def test_index_fetch_refuses_redirects_to_private_hosts():
+    seen = []
+
+    def handler(request):
+        seen.append((str(request.url), request.headers["host"]))
+        return httpx.Response(302, headers={"location": "http://intranet.example/admin"})
+
+    web = _web(handler, {"public.example": ["93.184.216.34"], "intranet.example": ["10.0.0.5"]})
     assert asyncio.run(web.fetch_url("http://public.example/")) is None
+    # The public hop was pinned to the checked IP; the private hop was never requested.
+    assert seen == [("http://93.184.216.34/", "public.example")]
+
+
+def test_index_fetch_refuses_hosts_with_any_private_address():
+    def handler(request):
+        raise AssertionError("must not connect")
+
+    web = _web(handler, {"rebind.example": ["93.184.216.34", "127.0.0.1"]})
+    assert asyncio.run(web.fetch_url("https://rebind.example/")) is None
 
 
 def test_aris_parses_leading_and_trailing_decimal_points():
     from aris.core.numbers import to_float
 
     assert to_float(".5") == 0.5 and to_float("5.") == 5.0 and to_float(".") is None
+
+
+# --- third review round -------------------------------------------------------------
+
+
+def _neg(text, *excludes):
+    from searchprobe.cases.models import ExcludeConstraint, FreeformConstraint
+
+    return TestCase(text=text, category="negation", constraints=[
+        TopicConstraint(id="c1", subject="a company"),
+        *[ExcludeConstraint(id=f"x{i}", concept=e) for i, e in enumerate(excludes)],
+        FreeformConstraint(id="q", requirement=f"The result directly satisfies the query: '{text}'"),
+    ])
+
+
+def test_twin_rewrites_the_query_requirement_for_its_own_text():
+    from searchprobe.cases.twins import negation_flip
+
+    twin = negation_flip(_neg("Companies that are NOT in the AI industry", "an AI company"))
+    assert twin.constraint("q").requirement == (
+        "The result directly satisfies the query: 'Companies that are in the AI industry'")
+
+
+def test_negation_flip_refuses_cases_with_several_exclusions():
+    from searchprobe.cases.twins import negation_flip
+
+    assert negation_flip(_neg("Companies NOT in AI or crypto", "AI", "crypto")) is None
+
+
+def test_twin_with_an_unrelated_free_text_requirement_is_rejected():
+    from searchprobe.cases.models import ExcludeConstraint, FreeformConstraint
+    from searchprobe.cases.twins import negation_flip
+
+    case = TestCase(text="Companies NOT in AI", category="negation", constraints=[
+        ExcludeConstraint(id="c1", concept="AI"),
+        FreeformConstraint(id="c2", requirement="Results must not mention machine learning")])
+    assert negation_flip(case) is None
+
+
+def test_numeric_scale_scales_both_bounds_once():
+    from searchprobe.cases.twins import numeric_scale
+
+    case = TestCase(text="Cities with between 10 and 100 parks", category="numeric_precision",
+                    constraints=[NumericConstraint(id="c1", attribute="parks", op="between",
+                                                   value=10, value_max=100)])
+    assert numeric_scale(case).text == "Cities with between 100 and 1,000 parks"
+
+
+def test_argument_swap_refuses_overlapping_names():
+    from searchprobe.cases.models import RelationConstraint
+    from searchprobe.cases.twins import argument_swap
+
+    case = TestCase(text="Companies that York acquired from New York", category="compositional",
+                    constraints=[RelationConstraint(id="c1", subject="York",
+                                                    predicate="acquired from",
+                                                    object="New York")])
+    assert argument_swap(case) is None
+
+
+def test_judge_fitness_is_cached_per_category_and_failures_are_retried():
+    class Provider:
+        calls = 0
+        fail = True
+
+        async def search(self, request):
+            Provider.calls += 1
+            if Provider.fail:
+                return SearchResponse(provider="p", query=request.query, error="503")
+            return SearchResponse(provider="p", query=request.query)
+
+    class Judge:
+        async def evaluate(self, query_id, query_text, category, search_response):
+            class E:
+                cost_usd = 0.0
+                counts_for_quality = True
+                weighted_score = 0.2 if category == "negation" else 0.6
+
+            return E()
+
+    ev = FitnessEvaluator(mode="llm_judge", provider=Provider(), judge=Judge())
+    first = [Individual(query="q", category="negation")]
+    asyncio.run(ev.evaluate_population(first))
+    assert first[0].fitness == 0.0 and Provider.calls == 1
+    Provider.fail = False
+    again = [Individual(query="q", category="negation"), Individual(query="q", category="numeric")]
+    asyncio.run(ev.evaluate_population(again))
+    assert Provider.calls == 3  # the failure was not cached; categories are scored apart
+    assert [i.fitness for i in again] == [pytest.approx(0.8), pytest.approx(0.4)]
+
+
+def test_url_normalization_keeps_content_selecting_parameters():
+    from searchprobe.perturbation.stability import normalize_url
+
+    assert normalize_url("https://e.org/p?reference=1") != normalize_url("https://e.org/p?reference=2")
+    assert normalize_url("https://e.org/p?ref=twitter&utm_source=x") == "e.org/p"
+
+
+def test_refetching_unchanged_content_keeps_the_url_fresh(tmp_path):
+    from datetime import UTC, datetime, timedelta
+
+    from searchprobe.evidence.store import EvidenceStore, Snapshot
+
+    store = EvidenceStore(tmp_path / "e.db")
+    old = datetime.now(UTC) - timedelta(days=30)
+    snap = Snapshot(content_hash="h", url="https://e.org", final_url="https://e.org", status="ok",
+                    http_status=200, title="t", text="body", fetched_at=old)
+    store.put(snap, "e.org")
+    assert store.get_for_url("e.org", max_age_days=7) is None
+    store.put(snap.model_copy(update={"fetched_at": datetime.now(UTC)}), "e.org")
+    assert store.get_for_url("e.org", max_age_days=7) is not None
+
+
+def test_discovery_continues_when_the_judge_fails():
+    from searchprobe.discovery.search import CaseEvaluator
+
+    class FailingJudge:
+        model = "m"
+
+        async def judge(self, case, evidence, decided=None):
+            raise RuntimeError("refusal")
+
+    case = TestCase(text="companies", category="negation",
+                    constraints=[TopicConstraint(id="c1", subject="a company")])
+    providers = {"t": FakeProvider(lambda q: ["https://a.example/"], name="t")}
+    tracker = CostTracker(budget_limit=1)
+    ev = CaseEvaluator(providers, "t", None, judge=FailingJudge(), k=1, cost_tracker=tracker)
+    result = asyncio.run(ev.evaluate(case))
+    assert result.fitness == 0.0
+    assert tracker.reserved_total == 0
+
+
+def test_numeric_wikidata_values_come_from_best_ranked_statements():
+    from searchprobe.cases.generators.wikidata import AREA_KM2, HEIGHT_M
+
+    assert "wikibase:BestRank" in AREA_KM2 and "wikibase:BestRank" in HEIGHT_M
+
+
+def test_calibration_saves_a_pair_only_when_fully_labeled(tmp_path, monkeypatch):
+    from typer.testing import CliRunner
+
+    import searchprobe.cli.calibrate as cal
+    from searchprobe.calibration.store import HumanLabelStore
+
+    case = TestCase(text="q", category="negation",
+                    constraints=[TopicConstraint(id="c1", subject="x"),
+                                 TopicConstraint(id="c2", subject="y")])
+    labels = HumanLabelStore(tmp_path / "l.db")
+    monkeypatch.setattr(cal, "_load", lambda settings, judge_id=None: (
+        None, [_judgment(case.id, "h1", "a@x")], {case.id: case}, labels))
+    monkeypatch.setattr(cal, "get_settings",
+                        lambda: Settings(_env_file=None, database_path=str(tmp_path / "x.db")))
+    CliRunner().invoke(cal.app, ["label", "--n", "1"], input="s\nq\n")
+    assert labels.labeled_pairs("human") == set()  # quit mid-pair: nothing saved
+    CliRunner().invoke(cal.app, ["label", "--n", "1"], input="s\nv\n2\n")
+    assert labels.all("human") == {(case.id, "h1", "c1"): "satisfied",
+                                   (case.id, "h1", "c2"): "violated",
+                                   (case.id, "h1", "__relevance__"): "2"}

@@ -87,13 +87,16 @@ async def index_urls(request: IndexRequest):
         raise HTTPException(status_code=403, detail="Index API disabled (ARIS_ENABLE_INDEX_API=1)")
     if _index_manager is None:
         raise HTTPException(status_code=503, detail="Index manager not initialized")
+    import asyncio
+
     from aris.sources.web import WebSource, is_public_http_url
 
-    blocked = [u for u in request.urls if not is_public_http_url(u)]
+    checks = await asyncio.gather(*[asyncio.to_thread(is_public_http_url, u) for u in request.urls])
+    blocked = [u for u, ok in zip(request.urls, checks, strict=True) if not ok]
     if blocked:
         raise HTTPException(status_code=400, detail=f"Refusing non-public URLs: {blocked}")
 
-    web = WebSource(url_guard=is_public_http_url)  # every redirect hop is checked too
+    web = WebSource(public_only=True)  # every hop resolved, checked and pinned
     try:
         documents = await web.fetch_urls(request.urls)
         _index_manager.add_documents(documents)

@@ -130,7 +130,14 @@ class CaseEvaluator:
                 if reservation is None:
                     judgments.append(None)
                     continue
-                j = await self.judge.judge(case, ev, decided=verdicts)
+                try:
+                    j = await self.judge.judge(case, ev, decided=verdicts)
+                except Exception as e:  # refusal / truncation: leave unjudged, keep going
+                    logger.warning("Judging failed for %s: %s", url, e)
+                    if self.cost_tracker is not None:
+                        self.cost_tracker.release(reservation)
+                    judgments.append(None)
+                    continue
                 if self.cost_tracker is not None:
                     self.cost_tracker.commit(reservation, "judge", "discovery", j.cost_usd)
             judgments.append(j)

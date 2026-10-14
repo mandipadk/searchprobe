@@ -566,11 +566,20 @@ async def _numeric_threshold(
     ]
 
 
+def _best_quantity(pid: str) -> str:
+    """Normalized quantity from best-ranked statements only (preferred, else normal):
+    deprecated values such as a superseded height never become answers."""
+    return (
+        f"?item p:{pid} ?st . ?st a wikibase:BestRank ; psn:{pid} ?n . "
+        "?n wikibase:quantityAmount ?v ."
+    )
+
+
 POPULATION = "?item wdt:P1082 ?v ."
-AREA_KM2 = "?item p:P2046 ?st . ?st psn:P2046 ?n . ?n wikibase:quantityAmount ?v ."
-HEIGHT_M = "?item p:P2048 ?st . ?st psn:P2048 ?n . ?n wikibase:quantityAmount ?v ."
-ELEVATION_M = "?item p:P2044 ?st . ?st psn:P2044 ?n . ?n wikibase:quantityAmount ?v ."
-LENGTH_M = "?item p:P2043 ?st . ?st psn:P2043 ?n . ?n wikibase:quantityAmount ?v ."
+AREA_KM2 = _best_quantity("P2046")
+HEIGHT_M = _best_quantity("P2048")
+ELEVATION_M = _best_quantity("P2044")
+LENGTH_M = _best_quantity("P2043")
 
 
 # ---------------------------------------------------------------------------

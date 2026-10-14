@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import Callable
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlsplit, urlunsplit
 
 import httpx
 
@@ -16,24 +17,29 @@ logger = logging.getLogger(__name__)
 MAX_REDIRECTS = 5
 
 
-def is_public_http_url(url: str) -> bool:
-    """Reject non-HTTP schemes and hosts that resolve to private/loopback/link-local IPs."""
-    import ipaddress
+def _system_resolve(host: str) -> list[str]:
     import socket
-    from urllib.parse import urlsplit
 
+    return [info[4][0] for info in socket.getaddrinfo(host, None)]
+
+
+def _is_public_ip(address: str) -> bool:
+    import ipaddress
+
+    ip = ipaddress.ip_address(address)
+    return not (ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved)
+
+
+def is_public_http_url(url: str, resolve: Callable[[str], list[str]] = _system_resolve) -> bool:
+    """Reject non-HTTP schemes and hosts that resolve to private/loopback/link-local IPs."""
     parts = urlsplit(url)
     if parts.scheme not in ("http", "https") or not parts.hostname:
         return False
     try:
-        infos = socket.getaddrinfo(parts.hostname, None)
+        addresses = resolve(parts.hostname)
     except OSError:
         return False
-    for info in infos:
-        ip = ipaddress.ip_address(info[4][0])
-        if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved:
-            return False
-    return True
+    return bool(addresses) and all(_is_public_ip(a) for a in addresses)
 
 
 class WebSource(DataSource):
@@ -42,30 +48,49 @@ class WebSource(DataSource):
     NAME = "web"
 
     def __init__(
-        self, max_retries: int = 2, url_guard: Callable[[str], bool] | None = None
+        self,
+        max_retries: int = 2,
+        public_only: bool = False,
+        resolve: Callable[[str], list[str]] = _system_resolve,
     ) -> None:
-        """``url_guard``, when set, must accept every URL fetched, including each
-        redirect target (redirects are then followed manually, not by httpx)."""
+        """With ``public_only``, every request (including each redirect hop) goes to a
+        public IP: the host is resolved once, off the event loop, every address is
+        checked, and the connection is pinned to the checked address, so a DNS answer
+        that changes between the check and the connection cannot reach a private host."""
         super().__init__(max_retries=max_retries)
         self._client: httpx.AsyncClient | None = None
-        self.url_guard = url_guard
+        self.public_only = public_only
+        self.resolve = resolve
 
     async def _get_client(self) -> httpx.AsyncClient:
         if self._client is None or self._client.is_closed:
             self._client = httpx.AsyncClient(
                 timeout=15.0,
-                follow_redirects=self.url_guard is None,
+                follow_redirects=not self.public_only,
                 headers={"User-Agent": "Aris/0.1 (search engine)"},
             )
         return self._client
 
+    async def _pinned_get(self, client: httpx.AsyncClient, url: str) -> httpx.Response:
+        parts = urlsplit(url)
+        if parts.scheme not in ("http", "https") or not parts.hostname:
+            raise ValueError(f"Refusing non-HTTP URL: {url}")
+        host = parts.hostname
+        addresses = await asyncio.wait_for(asyncio.to_thread(self.resolve, host), timeout=10)
+        if not addresses or not all(_is_public_ip(a) for a in addresses):
+            raise ValueError(f"Refusing non-public host: {host}")
+        ip = addresses[0]
+        ip_host = f"[{ip}]" if ":" in ip else ip
+        netloc = f"{ip_host}:{parts.port}" if parts.port else ip_host
+        pinned = urlunsplit((parts.scheme, netloc, parts.path or "/", parts.query, ""))
+        extensions = {"sni_hostname": host} if parts.scheme == "https" else {}
+        return await client.get(pinned, headers={"Host": parts.netloc}, extensions=extensions)
+
     async def _get(self, client: httpx.AsyncClient, url: str) -> httpx.Response:
-        if self.url_guard is None:
+        if not self.public_only:
             return await client.get(url)
         for _ in range(MAX_REDIRECTS + 1):
-            if not self.url_guard(url):
-                raise ValueError(f"URL refused by guard: {url}")
-            response = await client.get(url)
+            response = await self._pinned_get(client, url)
             if not response.is_redirect:
                 return response
             url = urljoin(url, response.headers.get("location", ""))
@@ -123,8 +148,6 @@ class WebSource(DataSource):
 
     async def fetch_urls(self, urls: list[str]) -> list[Document]:
         """Fetch and extract content from multiple URLs."""
-        import asyncio
-
         tasks = [self.fetch_url(url) for url in urls]
         results = await asyncio.gather(*tasks, return_exceptions=True)
         return [r for r in results if isinstance(r, Document)]

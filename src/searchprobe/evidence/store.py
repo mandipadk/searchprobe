@@ -120,15 +120,19 @@ class EvidenceStore:
         """Latest snapshot for a normalized URL, optionally no older than ``max_age_days``."""
         with self._conn() as conn:
             row = conn.execute(
-                """SELECT s.* FROM url_snapshots u JOIN snapshots s
-                   ON s.content_hash = u.content_hash WHERE u.url_norm = ?""",
+                """SELECT s.*, u.fetched_at AS url_fetched_at FROM url_snapshots u
+                   JOIN snapshots s ON s.content_hash = u.content_hash WHERE u.url_norm = ?""",
                 (url_norm,),
             ).fetchone()
         if row is None:
             return None
-        snap = self._row_to_snapshot(row)
+        d = dict(row)
+        # Freshness is when this URL was last fetched, which a refetch of unchanged
+        # content updates; the snapshot's own fetched_at is when the content first appeared.
+        last_fetched = datetime.fromisoformat(d.pop("url_fetched_at"))
+        snap = self._row_to_snapshot(d)
         if max_age_days is not None:
-            age = datetime.now(UTC) - snap.fetched_at.replace(tzinfo=snap.fetched_at.tzinfo or UTC)
+            age = datetime.now(UTC) - last_fetched.replace(tzinfo=last_fetched.tzinfo or UTC)
             if age > timedelta(days=max_age_days):
                 return None
         return snap
