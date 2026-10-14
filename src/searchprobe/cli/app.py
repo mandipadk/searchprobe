@@ -40,11 +40,14 @@ def main(
 
 
 # Import and register subcommands
+from searchprobe.cli import calibrate as calibrate_module  # noqa: E402
+from searchprobe.cli import cases as cases_module  # noqa: E402
 from searchprobe.cli import dashboard as dashboard_module  # noqa: E402
 from searchprobe.cli import evaluate as evaluate_module  # noqa: E402
 from searchprobe.cli import evolve as evolve_module  # noqa: E402
 from searchprobe.cli import generate as generate_module  # noqa: E402
 from searchprobe.cli import geometry as geometry_module  # noqa: E402
+from searchprobe.cli import judge as judge_module  # noqa: E402
 from searchprobe.cli import perturb as perturb_module  # noqa: E402
 from searchprobe.cli import report as report_module  # noqa: E402
 from searchprobe.cli import run as run_module  # noqa: E402
@@ -61,6 +64,10 @@ app.add_typer(validate_module.app, name="validate")
 app.add_typer(perturb_module.app, name="perturb")
 app.add_typer(evolve_module.app, name="evolve")
 app.add_typer(session_module.app, name="session")
+app.add_typer(cases_module.app, name="cases")
+app.add_typer(judge_module.judge_app, name="judge")
+app.add_typer(judge_module.scorecard_app, name="scorecard")
+app.add_typer(calibrate_module.app, name="calibrate")
 
 
 if __name__ == "__main__":

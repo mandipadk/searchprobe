@@ -184,6 +184,7 @@ class Database:
         "geometry_results": {"run_id": "TEXT REFERENCES runs(id)"},
         "runs": {"status": "TEXT"},
         "search_results": {"metadata": "TEXT"},
+        "queries": {"spec": "TEXT"},
         "evaluations": {
             "search_mode": "TEXT",
             "status": "TEXT DEFAULT 'ok'",
@@ -253,14 +254,20 @@ class Database:
         tier: str | None = None,
         ground_truth: dict[str, Any] | None = None,
         metadata: dict[str, Any] | None = None,
+        spec: dict[str, Any] | None = None,
     ) -> str:
-        """Add a query to a query set."""
+        """Add a query to a query set.
+
+        ``spec`` holds a full v2 ``TestCase`` (typed constraints, twins, answer
+        sets); when present it is the authoritative definition of the case.
+        """
         query_id = str(uuid4())
         with self._get_connection() as conn:
             conn.execute(
                 """INSERT INTO queries
-                   (id, query_set_id, text, category, difficulty, tier, ground_truth, metadata)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                   (id, query_set_id, text, category, difficulty, tier, ground_truth, metadata,
+                    spec)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     query_id,
                     query_set_id,
@@ -270,6 +277,7 @@ class Database:
                     tier,
                     json.dumps(ground_truth or {}),
                     json.dumps(metadata or {}),
+                    json.dumps(spec) if spec else None,
                 ),
             )
             # Update query count
@@ -279,6 +287,27 @@ class Database:
             )
             conn.commit()
         return query_id
+
+    def get_query(self, query_id: str) -> dict[str, Any] | None:
+        """Get a single query row by id."""
+        with self._get_connection() as conn:
+            row = conn.execute("SELECT * FROM queries WHERE id = ?", (query_id,)).fetchone()
+        return dict(row) if row else None
+
+    def add_cases(self, cases: list[Any], name: str | None = None) -> str:
+        """Create a query set from v2 ``TestCase`` objects; returns the query set id."""
+        query_set_id = self.create_query_set(name=name, config={"schema_version": 2})
+        for case in cases:
+            self.add_query(
+                query_set_id=query_set_id,
+                text=case.text,
+                category=case.category.value,
+                difficulty=case.difficulty,
+                tier=case.provenance.generator,
+                metadata={"case_id": case.id},
+                spec=case.model_dump(mode="json"),
+            )
+        return query_set_id
 
     def get_queries(
         self,
