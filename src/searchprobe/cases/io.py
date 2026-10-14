@@ -14,7 +14,7 @@ DATA_ROOT = Path(__file__).resolve().parents[3] / "data" / "cases"
 def load_cases(path: str | Path) -> list[TestCase]:
     """Load cases from a ``.jsonl`` file or every ``.jsonl`` file in a directory."""
     path = Path(path)
-    files = sorted(path.glob("*.jsonl")) if path.is_dir() else [path]
+    files = sorted(path.rglob("*.jsonl")) if path.is_dir() else [path]
     cases: list[TestCase] = []
     for file in files:
         with open(file, encoding="utf-8") as f:

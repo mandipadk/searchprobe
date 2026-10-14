@@ -41,9 +41,16 @@ def angular_distance(vec_a: NDArray[np.float32], vec_b: NDArray[np.float32]) -> 
     return float(math.acos(sim) / math.pi)
 
 
+# Below this many points, LID/isotropy estimates reflect sample size rather than
+# geometry (the original per-category analysis used ~10-12 points), so they are
+# reported as NaN instead of a misleading number.
+MIN_SAMPLES = 50
+
+
 def local_intrinsic_dimensionality(
     embeddings: NDArray[np.float32],
     k: int = 10,
+    min_samples: int = MIN_SAMPLES,
 ) -> float:
     """Estimate local intrinsic dimensionality using Maximum Likelihood Estimation.
 
@@ -61,6 +68,8 @@ def local_intrinsic_dimensionality(
     from sklearn.neighbors import NearestNeighbors
 
     n_samples = embeddings.shape[0]
+    if n_samples < max(min_samples, 3 * k):
+        return float("nan")
     if n_samples < k + 1:
         k = max(1, n_samples - 1)
 
@@ -89,7 +98,7 @@ def local_intrinsic_dimensionality(
     return float(np.mean(lids)) if lids else 0.0
 
 
-def isotropy_score(embeddings: NDArray[np.float32]) -> float:
+def isotropy_score(embeddings: NDArray[np.float32], min_samples: int = MIN_SAMPLES) -> float:
     """Measure how uniformly distributed embeddings are in the space.
 
     Based on Mu & Viswanath 2018 - "All-but-the-Top: Simple and Effective
@@ -104,8 +113,8 @@ def isotropy_score(embeddings: NDArray[np.float32]) -> float:
     Returns:
         Isotropy score in [0, 1]
     """
-    if embeddings.shape[0] < 2:
-        return 0.0
+    if embeddings.shape[0] < max(2, min_samples):
+        return float("nan")
 
     # Center embeddings
     centered = embeddings - np.mean(embeddings, axis=0)
@@ -125,7 +134,10 @@ def isotropy_score(embeddings: NDArray[np.float32]) -> float:
     # Max entropy = log(d) for d dimensions
     nonzero = eigenvalues_norm[eigenvalues_norm > 0]
     entropy = -np.sum(nonzero * np.log(nonzero))
-    max_entropy = np.log(len(eigenvalues_norm))
+    # n points span at most n-1 dimensions: normalize by the attainable rank,
+    # otherwise the score is capped at log(n-1)/log(d) regardless of geometry.
+    rank = min(embeddings.shape[0] - 1, len(eigenvalues_norm))
+    max_entropy = np.log(rank) if rank > 1 else 0.0
 
     if max_entropy == 0:
         return 0.0

@@ -36,11 +36,11 @@ DEFAULT_MODELS = [
 class EmbeddingGeometryAnalyzer:
     """Analyzes geometric properties of embedding spaces to explain search failures.
 
-    This is the core research module. Instead of just testing THAT search fails,
-    it measures WHY by analyzing the geometric properties of the embedding space.
-
-    Key insight: If cos(embed("companies in AI"), embed("companies NOT in AI")) = 0.96,
-    then ANY embedding-based retrieval system will fail on negation.
+    Measures query-to-query similarity on curated pairs. This is a descriptive
+    visualization, not evidence of retrieval failure: retrieval depends on
+    query-to-*document* scores. For a test of whether a retriever prefers a
+    satisfying document over a violating one, use ``searchprobe explain``
+    (triplet probes), which also links failures per case to search providers.
     """
 
     def __init__(

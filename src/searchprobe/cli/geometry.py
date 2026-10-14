@@ -49,6 +49,11 @@ def geometry(
     category_list = [c.strip() for c in categories.split(",")] if categories else None
 
     console.print(f"[blue]Analyzing embedding geometry with {len(model_list)} model(s)...[/blue]")
+    console.print(
+        "[dim]Note: query-to-query similarity is descriptive only. For evidence that a "
+        "retriever ranks violating documents above satisfying ones, use "
+        "`searchprobe explain triplets` + `searchprobe explain probe`.[/dim]"
+    )
 
     try:
         analyzer = EmbeddingGeometryAnalyzer(models=model_list)
