@@ -67,7 +67,10 @@ def label(
     for i, item in enumerate(items, 1):
         case, j = item.case, item.judgment
         snap = evidence.get(j.content_hash)
-        text = snap.text if snap and snap.ok else "(page text unavailable; judge saw the snippet)"
+        if not snap or not snap.ok:  # the judge saw a snippet we no longer have
+            console.print(f"[yellow]Skipping {j.url}: page text unavailable.[/yellow]")
+            continue
+        text = snap.text
         excerpt = select_passages(text, case.text, max_chars=2500)
         console.print(
             Panel(

@@ -357,10 +357,10 @@ def test_twin_with_an_unrelated_free_text_requirement_is_rejected():
 def test_numeric_scale_scales_both_bounds_once():
     from searchprobe.cases.twins import numeric_scale
 
-    case = TestCase(text="Cities with between 10 and 100 parks", category="numeric_precision",
+    case = TestCase(text="Cities with between 10 and 50 parks", category="numeric_precision",
                     constraints=[NumericConstraint(id="c1", attribute="parks", op="between",
-                                                   value=10, value_max=100)])
-    assert numeric_scale(case).text == "Cities with between 100 and 1,000 parks"
+                                                   value=10, value_max=50)])
+    assert numeric_scale(case).text == "Cities with between 100 and 500 parks"
 
 
 def test_argument_swap_refuses_overlapping_names():
@@ -466,9 +466,99 @@ def test_calibration_saves_a_pair_only_when_fully_labeled(tmp_path, monkeypatch)
         None, [_judgment(case.id, "h1", "a@x")], {case.id: case}, labels))
     monkeypatch.setattr(cal, "get_settings",
                         lambda: Settings(_env_file=None, database_path=str(tmp_path / "x.db")))
+    from datetime import UTC, datetime
+
+    from searchprobe.evidence.store import EvidenceStore, Snapshot
+
+    EvidenceStore(tmp_path / "x.db").put(
+        Snapshot(content_hash="h1", url="https://x.example/", text="page", title="t",
+                 fetched_at=datetime.now(UTC)), "x.example")
     CliRunner().invoke(cal.app, ["label", "--n", "1"], input="s\nq\n")
     assert labels.labeled_pairs("human") == set()  # quit mid-pair: nothing saved
     CliRunner().invoke(cal.app, ["label", "--n", "1"], input="s\nv\n2\n")
     assert labels.all("human") == {(case.id, "h1", "c1"): "satisfied",
                                    (case.id, "h1", "c2"): "violated",
                                    (case.id, "h1", "__relevance__"): "2"}
+
+
+# --- fourth review round ------------------------------------------------------------
+
+
+def test_numeric_scale_refuses_numbers_that_appear_twice():
+    from searchprobe.cases.twins import numeric_scale
+
+    case = TestCase(text="Fortune 500 companies with exactly 500 offices",
+                    category="numeric_precision",
+                    constraints=[NumericConstraint(id="c1", attribute="offices", op="eq",
+                                                   value=500)])
+    assert numeric_scale(case) is None
+
+
+def test_date_shift_refuses_to_move_february_29_to_a_common_year():
+    from searchprobe.cases.twins import date_shift
+
+    case = TestCase(text="Events on February 29, 2024", category="temporal_constraint",
+                    constraints=[DateConstraint(id="c1", field="event", start=date(2024, 2, 29),
+                                                end=date(2024, 2, 29))])
+    assert date_shift(case, years=-1) is None
+
+
+def test_calibration_skips_pairs_without_page_text(tmp_path, monkeypatch):
+    from typer.testing import CliRunner
+
+    import searchprobe.cli.calibrate as cal
+    from searchprobe.calibration.store import HumanLabelStore
+
+    case = TestCase(text="q", category="negation",
+                    constraints=[TopicConstraint(id="c1", subject="x")])
+    labels = HumanLabelStore(tmp_path / "l.db")
+    monkeypatch.setattr(cal, "_load", lambda settings, judge_id=None: (
+        None, [_judgment(case.id, "missing", "a@x")], {case.id: case}, labels))
+    monkeypatch.setattr(cal, "get_settings",
+                        lambda: Settings(_env_file=None, database_path=str(tmp_path / "x.db")))
+    result = CliRunner().invoke(cal.app, ["label", "--n", "1"], input="s\n2\n")
+    assert "page text unavailable" in result.output
+    assert labels.labeled_pairs("human") == set()
+
+
+def test_reevaluation_stops_without_recording_a_budget_failure():
+    from searchprobe.discovery.search import Elite, Evaluation, MapElites, discover
+
+    class Evaluator:
+        budget_exhausted = False
+        cost_tracker = None
+        calls = 0
+
+        async def evaluate(self, case):
+            Evaluator.calls += 1
+            if Evaluator.calls > 1:  # the re-evaluation runs out of budget
+                self.budget_exhausted = True
+                return Evaluation(0.0, None, None, False)
+            return Evaluation(0.8, None, None, True)
+
+    case = TestCase(text="companies", category="negation",
+                    constraints=[TopicConstraint(id="c1", subject="a company")])
+    result = asyncio.run(discover([case], Evaluator(), iterations=0, reevaluate=2))
+    (elite,) = result.archive.elites()
+    assert elite.mean_fitness == pytest.approx(0.8)
+    assert MapElites and Elite
+
+
+def test_cancelled_evaluation_releases_its_reservation():
+    class Provider:
+        async def search(self, request):
+            await asyncio.sleep(10)
+
+    tracker = CostTracker(budget_limit=1)
+    ev = FitnessEvaluator(mode="llm_judge", provider=Provider(), judge=object(),
+                          cost_tracker=tracker)
+
+    async def go():
+        task = asyncio.create_task(ev.evaluate_population([Individual(query="q")]))
+        await asyncio.sleep(0.01)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+    asyncio.run(go())
+    assert tracker.reserved_total == 0

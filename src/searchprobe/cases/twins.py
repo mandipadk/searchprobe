@@ -122,12 +122,30 @@ def _fmt_number(x: float) -> str:
     return f"{int(x):,}" if float(x).is_integer() else f"{x:g}"
 
 
+def _disjoint_after_scaling(c: NumericConstraint, factor: float) -> bool:
+    """A twin is useful only if no answer satisfies both it and its base.
+
+    "more than 50" vs "more than 500" are nested (a company with 1,000 employees
+    answers both), so threshold comparisons are not scaled.
+    """
+    if c.op in ("gt", "gte", "lt", "lte"):
+        return False
+    if c.op == "between":
+        assert c.value_max is not None
+        lo, hi = c.value * factor, c.value_max * factor
+        return lo > c.value_max or hi < c.value
+    band, scaled_band = abs(c.value) * c.tolerance, abs(c.value * factor) * c.tolerance
+    return abs(c.value * factor - c.value) > band + scaled_band
+
+
 def numeric_scale(case: TestCase, factor: float = 10.0) -> TestCase | None:
     """Scale the constrained number(s) by ``factor`` in text and constraint."""
     nums = [c for c in case.constraints if isinstance(c, NumericConstraint)]
     if len(nums) != 1:
         return None
     c = nums[0]
+    if not _disjoint_after_scaling(c, factor):
+        return None
     # Locate every bound in the *original* text, then replace all spans at once, so a
     # replaced bound is never matched again ("between 10 and 100" x10 must become
     # "between 100 and 1,000", not "between 1,000 and 100").
@@ -141,17 +159,18 @@ def numeric_scale(case: TestCase, factor: float = 10.0) -> TestCase | None:
             str(int(value)) if value.is_integer() else "",
         }
         taken = {(a, b) for a, b, _ in spans}
-        match = None
-        for rendered in sorted(r for r in renderings if r):
-            for m in re.finditer(rf"(?<![\d.,]){re.escape(rendered)}(?![\d.,])", case.text):
-                if (m.start(), m.end()) not in taken:
-                    match = m
-                    break
-            if match:
-                break
-        if match is None:
+        matches = {
+            (m.start(), m.end())
+            for rendered in renderings
+            if rendered
+            for m in re.finditer(rf"(?<![\d.,]){re.escape(rendered)}(?![\d.,])", case.text)
+        } - taken
+        # Exactly one occurrence: in "Fortune 500 companies with more than 500 employees"
+        # the number that expresses the constraint cannot be told apart.
+        if len(matches) != 1:
             return None
-        spans.append((match.start(), match.end(), _fmt_number(value * factor)))
+        match = min(matches)
+        spans.append((match[0], match[1], _fmt_number(value * factor)))
     text = case.text
     for start, end, new in sorted(spans, reverse=True):
         text = text[:start] + new + text[end:]
@@ -181,6 +200,9 @@ def date_shift(case: TestCase, years: int = -1) -> TestCase | None:
     if len(dates) != 1:
         return None
     c = dates[0]
+    for d in (c.start, c.end):  # Feb 29 would be clamped to Feb 28 while the text keeps 29
+        if d is not None and (d.month, d.day) == (2, 29) and _shift_year(d, years).day != 29:
+            return None
     years_in_window = {d.year for d in (c.start, c.end) if d}
     # One pass over the original text, so a shifted year is never shifted again
     # (2024-2025 shifted by +1 must become 2025-2026, not 2026-2026).

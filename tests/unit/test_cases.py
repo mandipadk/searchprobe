@@ -95,13 +95,19 @@ class TestTwins:
         assert twin.twin_of == _neg_case().id
 
     def test_numeric_scale_changes_text_and_constraint(self):
-        case = TestCase(text="Startups with more than 50 employees", category="numeric_precision",
+        case = TestCase(text="Startups with exactly 50 employees", category="numeric_precision",
                         operators=["numeric"],
-                        constraints=[NumericConstraint(id="c1", attribute="employees", op="gt",
+                        constraints=[NumericConstraint(id="c1", attribute="employees", op="eq",
                                                        value=50)])
         twin = numeric_scale(case)
-        assert twin.text == "Startups with more than 500 employees"
+        assert twin.text == "Startups with exactly 500 employees"
         assert twin.constraint("c1").value == 500
+
+    def test_numeric_scale_skips_thresholds_whose_answers_nest(self):
+        case = TestCase(text="Startups with more than 50 employees", category="numeric_precision",
+                        constraints=[NumericConstraint(id="c1", attribute="employees", op="gt",
+                                                       value=50)])
+        assert numeric_scale(case) is None  # every answer to "> 500" also answers "> 50"
 
     def test_numeric_scale_refuses_when_number_not_in_text(self):
         case = TestCase(text="Companies with exactly fifty employees", category="numeric_precision",

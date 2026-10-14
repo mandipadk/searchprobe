@@ -110,7 +110,15 @@ class FitnessEvaluator:
                         if reservation is None:
                             self.budget_exhausted = True
                             return
-                    fitness, cost, failed = await self._evaluate_with_cost(ind)
+                    try:
+                        fitness, cost, failed = await self._evaluate_with_cost(ind)
+                    except BaseException:  # cancellation bypasses the evaluators' handlers
+                        if self.cost_tracker is not None:
+                            # Spend so far is unknown to the tracker beyond this task's tally.
+                            self.cost_tracker.commit(
+                                reservation, "evolution", self.mode, _task_cost.get()
+                            )
+                        raise
                     if self.cost_tracker is not None:
                         self.cost_tracker.commit(reservation, "evolution", self.mode, cost)
                     self.total_cost += cost

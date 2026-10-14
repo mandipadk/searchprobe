@@ -248,7 +248,10 @@ async def discover(
         for _ in range(reevaluate):
             if evaluator.budget_exhausted:
                 break
-            elite.evaluations.append((await evaluator.evaluate(elite.case)).fitness)
+            evaluation = await evaluator.evaluate(elite.case)
+            if evaluator.budget_exhausted:  # incomplete evaluation: not a measurement
+                break
+            elite.evaluations.append(evaluation.fitness)
     return DiscoveryResult(archive, evaluated, accepted)
 
 
