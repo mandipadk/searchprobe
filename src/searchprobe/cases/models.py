@@ -120,7 +120,11 @@ class NumericConstraint(_ConstraintBase):
             "gt": "more than",
             "gte": "at least",
         }
-        return f"{self.attribute} is {words[self.op]} {self.value:g}{unit}"
+        text = f"{self.attribute} is {words[self.op]} {self.value:g}{unit}"
+        if self.op in ("eq", "approx") and self.tolerance:
+            band = abs(self.value) * self.tolerance  # same band as check()
+            text += f" (accepted: {self.value - band:g} to {self.value + band:g}{unit})"
+        return text
 
 
 class DateConstraint(_ConstraintBase):

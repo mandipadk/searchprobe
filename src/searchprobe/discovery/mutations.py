@@ -142,8 +142,11 @@ LLM_MUTATION_SCHEMA: dict[str, Any] = {
 }
 
 
-async def llm_rephrase(case: TestCase, client: Any, model: str) -> TestCase | None:
-    """LLM rewrite that must keep constraints (and therefore answers) unchanged."""
+async def llm_rephrase(case: TestCase, client: Any, model: str) -> tuple[TestCase | None, float]:
+    """LLM rewrite that must keep constraints (and therefore answers) unchanged.
+
+    Returns the child (None if the rewrite is unusable) and the call's cost.
+    """
     from searchprobe.llm import structured_call
 
     constraints = "\n".join(f"- {c.describe()}" for c in case.constraints)
@@ -157,5 +160,6 @@ async def llm_rephrase(case: TestCase, client: Any, model: str) -> TestCase | No
     )
     text = (result.data.get("query") or "").strip().strip('"')
     if not text or text.lower() == case.text.lower():
-        return None
-    return _child(case, text, f"llm_rephrase({result.data.get('change', '')[:80]})")
+        return None, result.cost_usd
+    change = result.data.get("change", "")[:80]
+    return _child(case, text, f"llm_rephrase({change})"), result.cost_usd

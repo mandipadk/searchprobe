@@ -71,7 +71,8 @@ class TestConvert:
              "date_min": "2025-01-01T00:00:00"},
         )
         types = [c.type for c in case.constraints]
-        assert types == ["exclude", "numeric", "date", "language"]
+        # The query itself is always appended as a hard criterion.
+        assert types == ["exclude", "numeric", "date", "language", "freeform"]
         assert case.operators == ["negation"]
 
     def test_case_without_ground_truth_gets_a_hard_criterion(self):

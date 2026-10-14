@@ -16,7 +16,8 @@ _SCALES = {
     "t": 1e12,
     "trillion": 1e12,
 }
-_NUM = re.compile(r"^\s*[$€£]?\s*(-?\d+(?:\.\d+)?)\s*([a-z]+)?\s*%?\s*$", re.IGNORECASE)
+# Accepts ".5" and "5." (a sentence-final period after a number) as well as "5.25".
+_NUM = re.compile(r"^\s*[$€£]?\s*(-?(?:\d+(?:\.\d*)?|\.\d+))\s*([a-z]+)?\s*%?\s*$", re.IGNORECASE)
 
 
 def to_float(value: object) -> float | None:

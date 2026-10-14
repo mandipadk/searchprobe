@@ -157,7 +157,9 @@ class EvidenceFetcher:
         if not extracted.text:
             return failure("empty", "no extractable text", http_status)
         return Snapshot(
-            content_hash=content_hash(extracted.text),
+            content_hash=content_hash(
+                extracted.text, meta=f"{extracted.title}|{extracted.published_date}"
+            ),
             url=url,
             final_url=final_url,
             status="ok",

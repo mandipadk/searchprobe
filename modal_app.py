@@ -89,13 +89,7 @@ def validate_cross_encoder(
     v = CrossEncoderValidator(model_name, device="cuda").validate_search_results(
         "remote", query_text, "unknown", "remote", results
     )
-    return {
-        "scores": [s.cross_encoder_score for s in v.scores],
-        "original_ndcg": v.original_ndcg,
-        "reranked_ndcg": v.reranked_ndcg,
-        "ndcg_improvement": v.ndcg_improvement,
-        "kendall_tau": v.kendall_tau,
-    }
+    return v.to_dict()  # scores are records (title, url, ranks, score), as before
 
 
 @app.function(timeout=900, **GPU_KW)
@@ -115,14 +109,7 @@ def batch_validate(
             item.get("provider", "unknown"),
             item["results"],
         )
-        out.append(
-            {
-                "query_id": v.query_id,
-                "ndcg_improvement": v.ndcg_improvement,
-                "kendall_tau": v.kendall_tau,
-                "original_ndcg": v.original_ndcg,
-            }
-        )
+        out.append({**v.to_dict(), "query_text": item["query_text"]})
     return out
 
 
@@ -156,6 +143,8 @@ def compute_fitness_batch(
                 "query": q,
                 "fitness": min(1.0, v.ndcg_improvement * 2),
                 "ndcg_improvement": v.ndcg_improvement,
+                "original_ndcg": v.original_ndcg,
+                "reranked_ndcg": v.reranked_ndcg,
             }
         )
     return out

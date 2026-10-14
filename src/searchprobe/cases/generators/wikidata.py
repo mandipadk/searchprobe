@@ -288,6 +288,11 @@ class GeneratorSpec:
 # ---------------------------------------------------------------------------
 
 
+def _violating(entities: list[KnownEntity], constraint_id: str) -> list[KnownEntity]:
+    """Negatives tagged with the constraint they break, so checkers can decide them."""
+    return [e.model_copy(update={"violates": [constraint_id]}) for e in entities]
+
+
 async def _not_member(
     wd: WikidataClient, continent: str, org_qid: str, org_name: str
 ) -> list[TestCase]:
@@ -319,7 +324,7 @@ async def _not_member(
             ),
         ],
         answer_set=non_members,
-        negative_set=members,
+        negative_set=_violating(members, "c2"),
         answer_set_complete=True,
         provenance=_prov(pattern_all + f" minus P463 {org_qid}"),
         validation="auto",
@@ -334,7 +339,7 @@ async def _not_member(
             TopicConstraint(id="c2", subject=f"a member state of {org_name}"),
         ],
         answer_set=members,
-        negative_set=non_members,
+        negative_set=_violating(non_members, "c2"),
         answer_set_complete=True,
         provenance=_prov(pattern_all + " " + member_of(org_qid)),
         validation="auto",
@@ -360,7 +365,7 @@ async def _landlocked(wd: WikidataClient, continent: str) -> list[TestCase]:
             ExcludeConstraint(id="c2", concept="a country with a sea coastline"),
         ],
         answer_set=landlocked,
-        negative_set=coastal,
+        negative_set=_violating(coastal, "c2"),
         answer_set_complete=True,
         provenance=_prov(pattern_all + f" ?item wdt:P31 wd:{LANDLOCKED}"),
         validation="auto",
@@ -375,7 +380,7 @@ async def _landlocked(wd: WikidataClient, continent: str) -> list[TestCase]:
             TopicConstraint(id="c2", subject="a country with a sea coastline"),
         ],
         answer_set=coastal,
-        negative_set=landlocked,
+        negative_set=_violating(landlocked, "c2"),
         provenance=_prov(pattern_all + f" minus P31 {LANDLOCKED}"),
         validation="auto",
     )
@@ -398,7 +403,7 @@ async def _eu_not_euro(wd: WikidataClient) -> list[TestCase]:
             ExcludeConstraint(id="c2", concept="a country whose currency is the euro"),
         ],
         answer_set=non_euro,
-        negative_set=euro,
+        negative_set=_violating(euro, "c2"),
         answer_set_complete=True,
         provenance=_prov(f"EU members (P463 {EU}) minus currency (P38) {EURO}"),
         validation="auto",
@@ -412,7 +417,7 @@ async def _eu_not_euro(wd: WikidataClient) -> list[TestCase]:
             TopicConstraint(id="c2", subject="a country whose currency is the euro"),
         ],
         answer_set=euro,
-        negative_set=non_euro,
+        negative_set=_violating(non_euro, "c2"),
         answer_set_complete=True,
         provenance=_prov(f"EU members with currency (P38) {EURO}"),
         validation="auto",
@@ -441,7 +446,7 @@ async def _set_difference(
                 ExcludeConstraint(id="c2", concept=f"a member state of {b_name}"),
             ],
             answer_set=only_a,
-            negative_set=both,
+            negative_set=_violating(both, "c2"),
             answer_set_complete=True,
             provenance=_prov(f"P463 {a_qid} minus P463 {b_qid}"),
             validation="auto",
@@ -502,7 +507,7 @@ async def _numeric_range(
                 ),
             ],
             answer_set=ans,
-            negative_set=neg,
+            negative_set=_violating(neg, "c2"),
             provenance=_prov(pattern + " " + value_expr),
             validation="auto",
             adversarial_reason="Numbers are tokens to an embedding model, not magnitudes",
@@ -553,7 +558,7 @@ async def _numeric_threshold(
                 ),
             ],
             answer_set=above,
-            negative_set=near,
+            negative_set=_violating(near, "c2"),
             answer_set_complete=complete,
             provenance=_prov(pattern + " " + value_expr),
             validation="auto",
@@ -609,7 +614,7 @@ async def _nobel_year(wd: WikidataClient, field: str, year: int) -> list[TestCas
                 ),
             ],
             answer_set=ans,
-            negative_set=neg,
+            negative_set=_violating(neg, "c2"),
             answer_set_complete=True,
             provenance=_prov(f"P166 {qid} with P585 year {y}"),
             validation="auto",
@@ -646,7 +651,7 @@ async def _independence_year(wd: WikidataClient, year: int) -> list[TestCase]:
                 ),
             ],
             answer_set=ans,
-            negative_set=neg,
+            negative_set=_violating(neg, "c2"),
             provenance=_prov(f"sovereign state with P571 year {year}"),
             validation="auto",
         )
@@ -1178,7 +1183,7 @@ async def generate(
     on_progress: Callable[[str, int], None] | None = None,
 ) -> tuple[list[TestCase], list[str]]:
     """Run generator specs; returns (cases, failure messages)."""
-    specs = specs or default_specs()
+    specs = default_specs() if specs is None else specs
     wd = client or WikidataClient()
     cases: list[TestCase] = []
     failures: list[str] = []

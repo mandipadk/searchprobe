@@ -164,13 +164,14 @@ def date_shift(case: TestCase, years: int = -1) -> TestCase | None:
         return None
     c = dates[0]
     years_in_window = {d.year for d in (c.start, c.end) if d}
-    text = case.text
-    changed = False
-    for y in sorted(years_in_window):
-        new_text = re.sub(rf"\b{y}\b", str(y + years), text)
-        changed = changed or new_text != text
-        text = new_text
-    if not changed:
+    # One pass over the original text, so a shifted year is never shifted again
+    # (2024-2025 shifted by +1 must become 2025-2026, not 2026-2026).
+    text = re.sub(
+        r"\b\d{4}\b",
+        lambda m: str(int(m.group()) + years) if int(m.group()) in years_in_window else m.group(),
+        case.text,
+    )
+    if text == case.text:
         return None
     new_c = c.model_copy(
         update={

@@ -17,7 +17,7 @@ from searchprobe.evidence.store import Snapshot
 from searchprobe.judging.models import RELEVANCE_SCALE, ConstraintVerdict, DocJudgment
 from searchprobe.llm import structured_call
 
-PROMPT_VERSION = "doc-judge-v1"
+PROMPT_VERSION = "doc-judge-v2"
 
 SYSTEM_PROMPT = f"""You are a meticulous search-quality assessor. You judge ONE document against ONE search query and a list of numbered constraints that define a correct result.
 

@@ -192,6 +192,27 @@ class Database:
         },
     }
 
+    # Run once, right after a migration adds the column, to fill it for legacy rows.
+    BACKFILLS: dict[tuple[str, str], str] = {
+        # Legacy evaluations had no mode; take it from the search result when the
+        # (run, query, provider) has exactly one, otherwise it stays unknown (NULL).
+        ("evaluations", "search_mode"): """
+            UPDATE evaluations SET search_mode = (
+                SELECT MIN(sr.search_mode) FROM search_results sr
+                WHERE sr.run_id = evaluations.run_id AND sr.query_id = evaluations.query_id
+                  AND sr.provider = evaluations.provider
+                HAVING COUNT(*) = 1)
+            WHERE search_mode IS NULL""",
+        # Legacy infrastructure failures were recorded only as failure modes.
+        ("evaluations", "status"): """
+            UPDATE evaluations SET status = CASE
+                WHEN failure_mode LIKE '%"search_failed"%' THEN 'search_error'
+                WHEN failure_mode LIKE '%"no_results"%' THEN 'no_results'
+                WHEN failure_mode LIKE '%"evaluation_failed"%'
+                  OR failure_mode LIKE '%"parse_error"%' THEN 'judge_error'
+                ELSE 'ok' END""",
+    }
+
     def __init__(self, db_path: str | Path = "searchprobe.db") -> None:
         """Initialize database connection."""
         self.db_path = Path(db_path)
@@ -207,6 +228,9 @@ class Database:
                 for column, decl in columns.items():
                     if column not in existing:
                         conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {decl}")
+                        backfill = self.BACKFILLS.get((table, column))
+                        if backfill:
+                            conn.execute(backfill)
             conn.commit()
 
     @contextmanager

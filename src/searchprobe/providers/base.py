@@ -50,6 +50,7 @@ class SearchProvider(ABC):
     NAME: ClassVar[str] = "base"
     SUPPORTED_MODES: ClassVar[list[str]] = []
     COST_PER_QUERY: ClassVar[dict[str, float]] = {}  # mode -> cost in USD
+    DEFAULT_MODE: ClassVar[str | None] = None  # mode used when a request names none
 
     def __init__(self, api_key: str) -> None:
         """Initialize the provider with an API key."""
@@ -115,5 +116,7 @@ class SearchProvider(ABC):
             Cost in USD per query
         """
         if mode is None:
-            mode = self.SUPPORTED_MODES[0] if self.SUPPORTED_MODES else "default"
+            mode = self.DEFAULT_MODE or (
+                self.SUPPORTED_MODES[0] if self.SUPPORTED_MODES else "default"
+            )
         return self.COST_PER_QUERY.get(mode, 0.005)  # Default $0.005 per query

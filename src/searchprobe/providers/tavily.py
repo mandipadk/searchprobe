@@ -22,6 +22,7 @@ class TavilyProvider(SearchProvider):
         "basic": 0.005,
         "advanced": 0.01,
     }
+    DEFAULT_MODE: ClassVar[str | None] = "advanced"
 
     def __init__(self, api_key: str) -> None:
         """Initialize Tavily client."""
@@ -42,7 +43,7 @@ class TavilyProvider(SearchProvider):
         import asyncio
 
         start_time = time.perf_counter()
-        mode = request.search_mode or "advanced"
+        mode = request.search_mode or self.DEFAULT_MODE
 
         try:
             # Build search parameters

@@ -78,27 +78,42 @@ class FitnessEvaluator:
         ``budget_exhausted`` is set.
         """
         semaphore = asyncio.Semaphore(self.max_concurrent)
+        live = self.mode in ("llm_judge", "cross_encoder") and self.provider is not None
+        inflight: dict[str, asyncio.Future[float]] = {}
+
+        def cache_key(ind: Individual) -> str:
+            query = " ".join(ind.query.lower().split())
+            # Heuristic fitness also depends on mutation depth, so it is part of the key.
+            return query if live else f"{query}|{len(ind.mutation_history)}"
 
         async def _one(ind: Individual) -> None:
-            key = " ".join(ind.query.lower().split())
+            key = cache_key(ind)
             if key in self._cache:
                 ind.fitness = self._cache[key]
                 return
-            async with semaphore:
-                reservation = None
-                live = self.mode in ("llm_judge", "cross_encoder") and self.provider is not None
-                if live and self.cost_tracker is not None:
-                    reservation = self.cost_tracker.try_reserve(self._estimate_cost())
-                    if reservation is None:
-                        self.budget_exhausted = True
-                        ind.fitness = 0.0
-                        return
-                fitness, cost = await self._evaluate_with_cost(ind)
-                if self.cost_tracker is not None:
-                    self.cost_tracker.commit(reservation, "evolution", self.mode, cost)
-                self.total_cost += cost
-            ind.fitness = fitness
-            self._cache[key] = fitness
+            if key in inflight:  # a duplicate in this population: share its evaluation
+                ind.fitness = await inflight[key]
+                return
+            future: asyncio.Future[float] = asyncio.get_running_loop().create_future()
+            inflight[key] = future
+            fitness = 0.0
+            try:
+                async with semaphore:
+                    reservation = None
+                    if live and self.cost_tracker is not None:
+                        reservation = self.cost_tracker.try_reserve(self._estimate_cost())
+                        if reservation is None:
+                            self.budget_exhausted = True
+                            return
+                    fitness, cost = await self._evaluate_with_cost(ind)
+                    if self.cost_tracker is not None:
+                        self.cost_tracker.commit(reservation, "evolution", self.mode, cost)
+                    self.total_cost += cost
+                self._cache[key] = fitness
+            finally:
+                ind.fitness = fitness
+                future.set_result(fitness)
+                del inflight[key]
 
         await asyncio.gather(*[_one(ind) for ind in individuals])
         return individuals

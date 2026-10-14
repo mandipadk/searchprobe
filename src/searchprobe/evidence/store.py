@@ -42,9 +42,16 @@ class Snapshot(BaseModel):
         return self.status == "ok" and bool(self.text)
 
 
-def content_hash(text: str, url: str = "") -> str:
-    """Hash of the extracted text; failed fetches hash their URL so they stay distinct."""
+def content_hash(text: str, url: str = "", meta: str = "") -> str:
+    """Hash of the extracted text plus judgment-relevant metadata (``meta``).
+
+    Failed fetches hash their URL so they stay distinct. ``meta`` keeps pages with
+    the same body but a different title or publication date (syndicated copies)
+    apart, since checkers and the judge read those fields.
+    """
     payload = text if text else f"__nocontent__::{url}"
+    if meta:
+        payload += f"::meta::{meta}"
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 

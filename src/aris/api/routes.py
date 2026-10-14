@@ -77,26 +77,6 @@ async def search(request: SearchRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-def _is_public_http_url(url: str) -> bool:
-    """Reject non-HTTP schemes and hosts that resolve to private/loopback/link-local IPs."""
-    import ipaddress
-    import socket
-    from urllib.parse import urlsplit
-
-    parts = urlsplit(url)
-    if parts.scheme not in ("http", "https") or not parts.hostname:
-        return False
-    try:
-        infos = socket.getaddrinfo(parts.hostname, None)
-    except OSError:
-        return False
-    for info in infos:
-        ip = ipaddress.ip_address(info[4][0])
-        if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved:
-            return False
-    return True
-
-
 @router.post("/index")
 async def index_urls(request: IndexRequest):
     import os
@@ -107,13 +87,13 @@ async def index_urls(request: IndexRequest):
         raise HTTPException(status_code=403, detail="Index API disabled (ARIS_ENABLE_INDEX_API=1)")
     if _index_manager is None:
         raise HTTPException(status_code=503, detail="Index manager not initialized")
-    blocked = [u for u in request.urls if not _is_public_http_url(u)]
+    from aris.sources.web import WebSource, is_public_http_url
+
+    blocked = [u for u in request.urls if not is_public_http_url(u)]
     if blocked:
         raise HTTPException(status_code=400, detail=f"Refusing non-public URLs: {blocked}")
 
-    from aris.sources.web import WebSource
-
-    web = WebSource()
+    web = WebSource(url_guard=is_public_http_url)  # every redirect hop is checked too
     try:
         documents = await web.fetch_urls(request.urls)
         _index_manager.add_documents(documents)

@@ -144,6 +144,9 @@ def generate_wikidata(
     if only:
         prefixes = tuple(p.strip() for p in only.split(","))
         specs = [s for s in specs if s.name.startswith(prefixes)]
+        if not specs:
+            console.print(f"[red]No generator matches --only {only!r}[/red]")
+            raise typer.Exit(1)
     console.print(f"Running {len(specs)} Wikidata generators...")
     cases, failures = asyncio.run(
         generate(specs, on_progress=lambda name, n: console.print(f"  {name}: {n} case(s)"))

@@ -119,14 +119,15 @@ def query_to_case(
     """Build a ``TestCase`` from v1 query fields."""
     gt = ground_truth or {}
     constraints = ground_truth_to_constraints(gt)
-    if not any(c.hard for c in constraints):
-        # Always have at least one hard criterion: the query itself.
-        constraints.append(
-            FreeformConstraint(
-                id=f"c{len(constraints) + 1}",
-                requirement=f"The result directly satisfies the query: '{text}'",
-            )
+    # The query itself is always a hard criterion: without it, a document that only
+    # meets the mechanical constraints (e.g. any German page for a language
+    # constraint) would count as fully satisfying.
+    constraints.append(
+        FreeformConstraint(
+            id=f"c{len(constraints) + 1}",
+            requirement=f"The result directly satisfies the query: '{text}'",
         )
+    )
     return TestCase(
         id=case_id or "",
         text=text,

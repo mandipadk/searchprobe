@@ -23,7 +23,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from typing import Any, ClassVar
 
@@ -133,8 +133,8 @@ class ConstraintAwareSearch(SearchProvider):
         return per_search * (1 + self.fanout) + verify + 0.02
 
     async def parse(self, query: str) -> ParsedQuery:
-        if query in self._parse_cache:
-            return self._parse_cache[query]
+        if query in self._parse_cache:  # no new parser call, so no new cost
+            return replace(self._parse_cache[query], cost_usd=0.0)
         if self.client is None:
             case = TestCase(
                 text=query,

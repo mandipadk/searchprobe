@@ -42,6 +42,13 @@ class ResearchProfile(BaseModel):
         with open(path, "rb") as f:
             return cls.model_validate(tomllib.load(f))
 
+    def canonical_systems(self) -> list[str]:
+        """System keys as stored by the runner (a bare Exa-backed system runs in auto)."""
+        return [
+            f"{key}:auto" if ":" not in key and (key == "exa" or key.endswith("+exa")) else key
+            for key in self.systems
+        ]
+
     def providers_and_modes(self) -> tuple[list[str], dict[str, list[str]]]:
         """Split system keys into runner providers and each Exa-backed provider's modes."""
         providers: list[str] = []
@@ -81,6 +88,8 @@ async def run_research(profile: ResearchProfile, settings: Any, log=print) -> di
         ids = {c.id for c in bases} | {t for c in bases for t in c.twins.values()}
         cases = [c for c in cases if c.id in ids]
     log(f"{len(cases)} cases ({sum(not c.twin_of for c in cases)} base)")
+    if not cases:
+        raise ValueError(f"No cases selected from {profile.cases} (check categories/limit)")
 
     qs_id = db.add_cases(cases, name=f"research:{profile.name}")
     queries = db.get_queries(query_set_id=qs_id)
@@ -115,7 +124,9 @@ async def run_research(profile: ResearchProfile, settings: Any, log=print) -> di
             concurrency=8,
         )
         try:
-            judged = await engine.judge_run(bench.run_id, systems=profile.systems, k=profile.k)
+            judged = await engine.judge_run(
+                bench.run_id, systems=profile.canonical_systems(), k=profile.k
+            )
         finally:
             if fetcher is not None:
                 await fetcher.close()
@@ -145,7 +156,7 @@ async def run_research(profile: ResearchProfile, settings: Any, log=print) -> di
         variants = build_variants(cases, repeats=profile.metamorphic_repeats)
         if variants:
             meta = MetamorphicEngine(
-                build_providers(profile.systems, settings),
+                build_providers(profile.canonical_systems(), settings),
                 num_results=profile.num_results,
                 cost_tracker=CostTracker(budget_limit=profile.budget_search),
             )

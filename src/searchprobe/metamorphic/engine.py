@@ -92,6 +92,8 @@ class MetamorphicEngine:
             return None, error
         if response.error:
             return None, response.error
+        if not response.results:  # RBO against an empty list is not an observation
+            return None, "empty results"
         return response, None
 
     async def run(

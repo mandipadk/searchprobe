@@ -263,7 +263,7 @@ class TestEndToEnd:
             for c in case.constraints:
                 labels.put(case.id, item.judgment.content_hash, c.id,
                            item.judgment.verdict_for(c.id))
-        rep = agreement_report(labels.all(), judgments, {case.id: case})
+        rep = agreement_report(labels.all("human"), judgments, {case.id: case})
         assert rep.n_pairs == len(sample)
         assert rep.overall_verdict_kappa == pytest.approx(1.0)
 

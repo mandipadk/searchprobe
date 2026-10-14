@@ -133,6 +133,8 @@ class BenchmarkRunner:
         Returns:
             BenchmarkResult with all responses
         """
+        if not queries:
+            raise ValueError("No queries to run")
         started_at = datetime.now(UTC)
 
         # Create run in database if not provided
@@ -167,7 +169,18 @@ class BenchmarkRunner:
             nonlocal completed, skipped_for_budget
             async with semaphore:
                 request = self._build_request(task)
-                provider = self._get_provider(task.provider_name)
+                try:
+                    provider = self._get_provider(task.provider_name)
+                except Exception as e:  # e.g. missing API key: fail this task, not the run
+                    response = SearchResponse(
+                        provider=task.provider_name,
+                        search_mode=task.search_mode,
+                        query=task.query_text,
+                        error=f"provider unavailable: {type(e).__name__}: {e}",
+                    )
+                    self.db.add_search_result(run_id, task.query_id, response)
+                    completed += 1
+                    return response
                 # Reserve the estimated cost *before* dispatch so concurrent tasks
                 # cannot collectively overspend the budget.
                 reservation = self.cost_tracker.try_reserve(provider.estimate_cost(request))
@@ -201,18 +214,20 @@ class BenchmarkRunner:
                     )
                 return response
 
-        task_results = await asyncio.gather(*[execute_task(t) for t in tasks])
-        results = [r for r in task_results if r is not None]
-        status = "partial" if skipped_for_budget else "completed"
-
+        status = "failed"
+        try:
+            task_results = await asyncio.gather(*[execute_task(t) for t in tasks])
+            results = [r for r in task_results if r is not None]
+            status = "partial" if skipped_for_budget else "completed"
+        finally:  # the run is closed and providers released even if a task raises
+            self.db.complete_run(
+                run_id,
+                self.cost_tracker.get_total(),
+                self.cost_tracker.get_total_by_provider(),
+                status=status,
+            )
+            await self._cleanup_providers()
         completed_at = datetime.now(UTC)
-        self.db.complete_run(
-            run_id,
-            self.cost_tracker.get_total(),
-            self.cost_tracker.get_total_by_provider(),
-            status=status,
-        )
-        await self._cleanup_providers()
 
         return BenchmarkResult(
             run_id=run_id,

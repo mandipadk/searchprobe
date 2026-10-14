@@ -67,6 +67,9 @@ def cell_of(case: TestCase) -> tuple[str, str, str]:
     return (case.category.value, _family(case), _size_bucket(case))
 
 
+LLM_MUTATION_ESTIMATE = 0.01  # conservative per-call estimate for budget reservation
+
+
 class CaseEvaluator:
     """Search + judge one case on the target and reference systems."""
 
@@ -209,11 +212,17 @@ async def discover(
         name = rng.choice(mutation_names)
         if name == "llm_rephrase":
             client, model = llm  # type: ignore[misc]
+            reservation = evaluator._reserve(LLM_MUTATION_ESTIMATE)
+            if reservation is None:
+                break
+            cost = 0.0
             try:
-                child = await llm_rephrase(parent, client, model)
+                child, cost = await llm_rephrase(parent, client, model)
             except Exception as e:
                 logger.warning("LLM mutation failed: %s", e)
                 child = None
+            if evaluator.cost_tracker is not None:
+                evaluator.cost_tracker.commit(reservation, "mutation", model, cost)
         else:
             child = RULE_MUTATIONS[name](parent, rng)
         if child is None or not archive.is_new(child):

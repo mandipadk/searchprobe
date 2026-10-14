@@ -90,14 +90,13 @@ class HumanLabelStore:
         with self._conn() as conn:
             return {(r[0], r[1]) for r in conn.execute(query, params)}
 
-    def all(self, labeler: str | None = None) -> dict[tuple[str, str, str], str]:
-        query = "SELECT case_id, content_hash, constraint_id, label FROM human_labels"
-        params: list[str] = []
-        if labeler:
-            query += " WHERE labeler = ?"
-            params.append(labeler)
+    def all(self, labeler: str) -> dict[tuple[str, str, str], str]:
+        """One labeler's labels (labels of different people are never merged)."""
+        query = (
+            "SELECT case_id, content_hash, constraint_id, label FROM human_labels WHERE labeler = ?"
+        )
         with self._conn() as conn:
-            return {(r[0], r[1], r[2]): r[3] for r in conn.execute(query, params)}
+            return {(r[0], r[1], r[2]): r[3] for r in conn.execute(query, [labeler])}
 
 
 def stratified_sample(
@@ -114,10 +113,13 @@ def stratified_sample(
     """
     exclude = exclude or set()
     strata: dict[tuple[str, str], list[LabelItem]] = defaultdict(list)
+    seen: set[tuple[str, str]] = set()
     for j in judgments:
         case = cases.get(j.case_id)
-        if case is None or (j.case_id, j.content_hash) in exclude:
+        pair = (j.case_id, j.content_hash)
+        if case is None or pair in exclude or pair in seen:  # each pair is labeled once
             continue
+        seen.add(pair)
         outcome = (
             "violating"
             if j.is_violating(case)
@@ -169,7 +171,10 @@ def agreement_report(
     judgments: list[DocJudgment],
     cases: dict[str, TestCase],
 ) -> AgreementReport:
-    """Compare stored human labels with judge outputs."""
+    """Compare one labeler's labels with one judge's outputs."""
+    judges = {(j.judge_id, j.prompt_version) for j in judgments}
+    if len(judges) > 1:
+        raise ValueError(f"agreement_report needs one judge, got {sorted(judges)}")
     by_pair = {(j.case_id, j.content_hash): j for j in judgments}
     rel_h: list[int] = []
     rel_j: list[int] = []

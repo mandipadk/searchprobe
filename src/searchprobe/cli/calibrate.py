@@ -12,15 +12,22 @@ console = Console()
 app = typer.Typer(help="Measure judge reliability against human labels (Cohen's kappa).")
 
 
-def _load(settings):
+def _load(settings, judge_id: str | None = None):
+    """Load one judge's judgments (default: the configured judge, current prompt)."""
     from searchprobe.calibration.store import HumanLabelStore
     from searchprobe.cases.convert import db_query_to_case
+    from searchprobe.judging.llm_judge import PROMPT_VERSION
     from searchprobe.judging.store import JudgmentStore
     from searchprobe.storage import Database
 
     db = Database(settings.database_path)
-    judgments = JudgmentStore(settings.database_path).all()
-    judgments = [j for j in judgments if j.judge_id != "checker"]
+    judge_id = judge_id or f"{settings.judge_model}@{settings.judge_effort or 'default'}"
+    judgments = [
+        j
+        for j in JudgmentStore(settings.database_path).all()
+        if j.judge_id == judge_id and j.prompt_version == PROMPT_VERSION
+    ]
+    console.print(f"Judge: {judge_id} ({PROMPT_VERSION}), {len(judgments)} judgments")
     cases = {}
     for qs in db.get_queries():
         case = db_query_to_case(qs)
@@ -33,6 +40,7 @@ def label(
     n: int = typer.Option(200, "--n", help="Target number of labeled pairs"),
     labeler: str = typer.Option("human", "--labeler"),
     seed: int = typer.Option(0, "--seed"),
+    judge_id: str | None = typer.Option(None, "--judge", help="model@effort (default: configured)"),
 ) -> None:
     """Interactively label a stratified sample of judged (case, document) pairs.
 
@@ -44,7 +52,7 @@ def label(
     from searchprobe.evidence.store import EvidenceStore
 
     settings = get_settings()
-    _, judgments, cases, labels = _load(settings)
+    _, judgments, cases, labels = _load(settings, judge_id)
     done = labels.labeled_pairs(labeler)
     remaining = max(0, n - len(done))
     if remaining == 0:
@@ -93,12 +101,15 @@ def label(
 
 
 @app.command("report")
-def report(labeler: str | None = typer.Option(None, "--labeler")) -> None:
-    """Agreement between the judge and human labels (per constraint type)."""
+def report(
+    labeler: str = typer.Option("human", "--labeler", help="Whose labels to compare against"),
+    judge_id: str | None = typer.Option(None, "--judge", help="model@effort (default: configured)"),
+) -> None:
+    """Agreement between one judge and one labeler (per constraint type)."""
     from searchprobe.calibration.store import agreement_report
 
     settings = get_settings()
-    _, judgments, cases, labels = _load(settings)
+    _, judgments, cases, labels = _load(settings, judge_id)
     rep = agreement_report(labels.all(labeler), judgments, cases)
     if rep.n_pairs == 0:
         console.print("[yellow]No labeled pairs yet. Run `searchprobe calibrate label`.[/yellow]")

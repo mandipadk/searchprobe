@@ -222,12 +222,14 @@ def build_cases(
                         provenance=prov,
                         validation="auto",
                     )
+                    if twin.id == case.id or any(twin.id == c.id for c in cases):
+                        raise ValueError("twin text is the same query as an existing case")
                     case = case.model_copy(
                         update={"twins": {twin.twin_relation: twin.id}}  # type: ignore[dict-item]
                     )
                     cases.append(twin)
-                except ValidationError:
-                    pass
+                except (ValidationError, ValueError) as e:
+                    rejected.append(f"twin of {case.text!r}: {e}")
         cases.append(case)
     # Rule-based twins for cases the model did not twin.
     untwinned = [c for c in cases if not c.twins and not c.twin_of]
