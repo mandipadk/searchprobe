@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "searchprobe"
-version = "2.0.0"
+version = "3.0.0"
 description = "Adversarial research framework for neural search engines"
 readme = "README.md"
 license = "MIT"
@@ -41,9 +41,6 @@ dependencies = [
     "anthropic[vertex]>=0.39",
     "openai>=1.40",
 
-    # Database
-    "aiosqlite>=0.19",
-
     # Analysis & Visualization
     "numpy>=1.26",
     "scipy>=1.12",
@@ -70,6 +67,7 @@ dependencies = [
 [project.optional-dependencies]
 analysis = [
     "sentence-transformers>=3.0",
+    "einops>=0.7",  # required by some embedding models loaded with trust_remote_code
     "torch>=2.0",
     "scikit-learn>=1.4",
     "umap-learn>=0.5",

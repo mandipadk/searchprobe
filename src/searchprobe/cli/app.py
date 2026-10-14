@@ -53,6 +53,7 @@ from searchprobe.cli import judge as judge_module  # noqa: E402
 from searchprobe.cli import metamorphic as metamorphic_module  # noqa: E402
 from searchprobe.cli import perturb as perturb_module  # noqa: E402
 from searchprobe.cli import report as report_module  # noqa: E402
+from searchprobe.cli import research as research_module  # noqa: E402
 from searchprobe.cli import run as run_module  # noqa: E402
 from searchprobe.cli import session as session_module  # noqa: E402
 from searchprobe.cli import validate as validate_module  # noqa: E402
@@ -74,6 +75,7 @@ app.add_typer(calibrate_module.app, name="calibrate")
 app.add_typer(metamorphic_module.app, name="metamorphic")
 app.add_typer(explain_module.app, name="explain")
 app.add_typer(discover_module.app, name="discover")
+app.add_typer(research_module.app, name="research")
 
 
 if __name__ == "__main__":

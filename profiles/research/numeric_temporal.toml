@@ -1,0 +1,8 @@
+# Numbers and dates: Wikidata-backed ranges, thresholds, years and publication windows.
+name = "numeric-temporal"
+cases = "data/cases/v1"
+categories = ["numeric_precision", "temporal_constraint", "multi_constraint"]
+limit = 30
+systems = ["exa:neural", "exa:auto", "tavily", "brave"]
+budget_search = 4.0
+budget_judge = 10.0

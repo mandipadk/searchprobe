@@ -8,6 +8,7 @@ from typing import Any
 
 from searchprobe.config import Settings, get_settings
 from searchprobe.core.exceptions import PipelineError
+from searchprobe.manifest import build_manifest
 from searchprobe.pipeline.cost_tracker import CostTracker
 from searchprobe.pipeline.rate_limiter import RateLimiterPool
 from searchprobe.providers.models import SearchRequest, SearchResponse
@@ -141,6 +142,11 @@ class BenchmarkRunner:
                     "exa_modes": self.config.exa_modes,
                     "num_results": self.config.num_results,
                     "budget_limit": self.config.budget_limit,
+                    "manifest": build_manifest(
+                        self.settings,
+                        n_queries=len(queries),
+                        query_set_id=queries[0].get("query_set_id"),
+                    ),
                 },
             )
 

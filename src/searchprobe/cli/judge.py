@@ -99,7 +99,7 @@ def _print_scorecard(card, k: int) -> None:
             )
 
 
-def _emit(card, run, k, out: Path | None, fmt: str, judge_note: str) -> None:
+def _emit(card, run, k, out: Path | None, fmt: str, judge_note: str, manifest=None) -> None:
     from searchprobe.metrics.render import scorecard_markdown
 
     if fmt in ("table", "both"):
@@ -109,10 +109,12 @@ def _emit(card, run, k, out: Path | None, fmt: str, judge_note: str) -> None:
         if out.suffix == ".json":
             out.write_text(json.dumps(card.to_dict(), indent=2, default=str))
         else:
-            out.write_text(scorecard_markdown(card, run, k=k, judge_note=judge_note))
+            out.write_text(
+                scorecard_markdown(card, run, k=k, judge_note=judge_note, manifest=manifest)
+            )
         console.print(f"[green]Wrote {out}[/green]")
     elif fmt in ("markdown", "both"):
-        console.print(scorecard_markdown(card, run, k=k, judge_note=judge_note))
+        console.print(scorecard_markdown(card, run, k=k, judge_note=judge_note, manifest=manifest))
 
 
 @judge_app.callback(invoke_without_command=True)
@@ -160,7 +162,8 @@ def judge(
         f"{run.skipped_for_budget} skipped for budget. Cost ${run.cost_usd:.4f}"
     )
     card = build_scorecard(compute_list_metrics(run, k=k))
-    _emit(card, run, k, out, "table", f"Judge: {engine.judge.judge_id}")
+    manifest = ((db.get_run(actual) or {}).get("config") or {}).get("manifest")
+    _emit(card, run, k, out, "table", f"Judge: {engine.judge.judge_id}", manifest)
 
 
 @scorecard_app.callback(invoke_without_command=True)
@@ -183,4 +186,7 @@ def scorecard(
     system_list = [s.strip() for s in systems.split(",")] if systems else None
     run = asyncio.run(_judge(engine, fetcher, actual, system_list, k, False, None))
     card = build_scorecard(compute_list_metrics(run, k=k))
-    _emit(card, run, k, out, fmt, f"Judge: {engine.judge.judge_id} (cached judgments only)")
+    manifest = ((db.get_run(actual) or {}).get("config") or {}).get("manifest")
+    _emit(
+        card, run, k, out, fmt, f"Judge: {engine.judge.judge_id} (cached judgments only)", manifest
+    )

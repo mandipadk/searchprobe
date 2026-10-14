@@ -1,0 +1,12 @@
+# Negation and set-difference queries: do engines return what was excluded?
+name = "negation"
+cases = "data/cases/v1"
+categories = ["negation", "boolean_logic"]
+limit = 25
+systems = ["exa:neural", "exa:auto", "brave"]
+num_results = 10
+k = 10
+budget_search = 3.0
+budget_judge = 8.0
+judge = true
+metamorphic = true

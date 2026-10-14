@@ -17,6 +17,10 @@ from searchprobe.intelligence.taxonomy import FailureClassifier, FailureMode
 logger = logging.getLogger(__name__)
 
 
+# Minimum category points before any correlation is computed.
+MIN_POINTS = 8
+
+
 class CorrelationEngine:
     """Computes cross-module correlations and generates intelligence profiles."""
 
@@ -89,8 +93,8 @@ class CorrelationEngine:
 
         # Build matrix: rows = categories, columns = dimensions
         cats = sorted(vectors.keys())
-        if len(cats) < 3:
-            # Not enough categories for meaningful correlation
+        if len(cats) < MIN_POINTS:
+            # Not enough categories for a meaningful correlation
             return {}
 
         matrix = np.full((len(cats), n_dims), np.nan)
@@ -100,28 +104,33 @@ class CorrelationEngine:
                 if v is not None:
                     matrix[i, j] = v
 
-        correlations: dict[str, dict[str, float | None]] = {}
+        from scipy.stats import spearmanr
+
+        from searchprobe.evaluation.statistics import benjamini_hochberg
+
+        # Spearman rho per dimension pair. A correlation is reported only with
+        # enough points and when it survives Benjamini-Hochberg correction across
+        # all pairs; with ~4-13 category points, |rho| > 0.5 alone is common noise.
+        tested: dict[tuple[int, int], tuple[float, float]] = {}
         for a in range(n_dims):
-            correlations[dim_names[a]] = {}
-            for b in range(n_dims):
-                if a == b:
-                    correlations[dim_names[a]][dim_names[b]] = 1.0
-                    continue
-
-                # Get valid pairs
+            for b in range(a + 1, n_dims):
                 valid = ~np.isnan(matrix[:, a]) & ~np.isnan(matrix[:, b])
-                if valid.sum() < 3:
-                    correlations[dim_names[a]][dim_names[b]] = None
+                if valid.sum() < MIN_POINTS:
                     continue
-
-                from scipy.stats import spearmanr
-
                 rho, p_value = spearmanr(matrix[valid, a], matrix[valid, b])
-                if np.isnan(rho):
-                    correlations[dim_names[a]][dim_names[b]] = None
-                else:
-                    correlations[dim_names[a]][dim_names[b]] = round(float(rho), 3)
+                if not np.isnan(rho):
+                    tested[(a, b)] = (float(rho), float(p_value))
+        keys = list(tested)
+        significant = dict(zip(keys, benjamini_hochberg([tested[k][1] for k in keys])))
 
+        correlations: dict[str, dict[str, float | None]] = {
+            dim_names[a]: {dim_names[b]: (1.0 if a == b else None) for b in range(n_dims)}
+            for a in range(n_dims)
+        }
+        for (a, b), (rho, _) in tested.items():
+            if significant[(a, b)]:
+                correlations[dim_names[a]][dim_names[b]] = round(rho, 3)
+                correlations[dim_names[b]][dim_names[a]] = round(rho, 3)
         return correlations
 
     def generate_profiles(

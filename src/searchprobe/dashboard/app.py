@@ -55,6 +55,7 @@ def run_dashboard() -> None:
     page = st.sidebar.radio(
         "Navigate",
         [
+            "🎯 Scorecard",
             "📊 Overview",
             "🏆 Provider Comparison",
             "📁 Category Deep Dive",
@@ -86,7 +87,11 @@ def run_dashboard() -> None:
     )
 
     # Route to page
-    if page == "📊 Overview":
+    if page == "🎯 Scorecard":
+        from searchprobe.dashboard.pages.scorecard import render
+
+        render(db, selected_run["id"])
+    elif page == "📊 Overview":
         from searchprobe.dashboard.pages.overview import render
 
         render(db, selected_run["id"])

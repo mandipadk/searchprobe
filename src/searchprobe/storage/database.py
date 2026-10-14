@@ -383,6 +383,16 @@ class Database:
             )
             conn.commit()
 
+    def get_run(self, run_id: str) -> dict[str, Any] | None:
+        """A run row with its config (including the manifest) decoded."""
+        with self._get_connection() as conn:
+            row = conn.execute("SELECT * FROM runs WHERE id = ?", (run_id,)).fetchone()
+        if row is None:
+            return None
+        run = dict(row)
+        run["config"] = json.loads(run["config"]) if run.get("config") else {}
+        return run
+
     def get_latest_run_id(self) -> str | None:
         """Get the most recent run ID."""
         with self._get_connection() as conn:

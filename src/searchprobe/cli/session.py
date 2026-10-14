@@ -23,7 +23,16 @@ def session(
         help="Path to a TOML profile file",
     ),
 ) -> None:
-    """Run a full research session defined by a TOML profile."""
+    """[Legacy] Run the original research-module DAG from a TOML profile.
+
+    Superseded by `searchprobe research --profile profiles/research/<name>.toml`,
+    which runs the measured pipeline (cases, search, per-document judging,
+    scorecard, metamorphic tests).
+    """
+    console.print(
+        "[yellow]`session` runs the legacy research-module DAG. For measured results use "
+        "`searchprobe research --profile profiles/research/negation.toml`.[/yellow]"
+    )
     from searchprobe.core.config import SearchProbeProfile
     from searchprobe.intelligence.session import ResearchSession
 

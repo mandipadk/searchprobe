@@ -23,7 +23,7 @@ evolution_population = 20
 evolution_fitness_mode = "embedding_sim"
 evolution_budget = 3.0
 
-judge_model = "claude-sonnet-4-6"
+judge_model = "claude-sonnet-5-5"
 num_results = 10
 budget_limit = 10.0
 max_concurrent = 5

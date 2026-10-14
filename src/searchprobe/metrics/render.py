@@ -44,10 +44,24 @@ def scorecard_markdown(
     run: RunJudgments | None = None,
     k: int = 10,
     judge_note: str | None = None,
+    manifest: dict | None = None,
 ) -> str:
     lines = ["# SearchProbe Scorecard", ""]
     if judge_note:
         lines += [judge_note, ""]
+    if manifest:
+        packages = ", ".join(f"{k} {v}" for k, v in manifest.get("packages", {}).items())
+        lines += [
+            "<details><summary>Run manifest</summary>",
+            "",
+            f"- SearchProbe {manifest.get('searchprobe_version')} at `{manifest.get('git_sha')}`",
+            f"- Created {manifest.get('created_at')}, {manifest.get('n_queries', '?')} queries "
+            f"(query set `{manifest.get('query_set_id')}`)",
+            f"- Python {manifest.get('python')}; {packages}",
+            "",
+            "</details>",
+            "",
+        ]
     systems = sorted(card.by_system)
     metrics = list(next(iter(card.by_system.values())).keys()) if card.by_system else []
 
