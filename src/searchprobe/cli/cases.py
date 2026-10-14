@@ -124,3 +124,149 @@ def import_cases(
     qs_id = db.add_cases(cases, name=name or f"cases:{Path(path).name}")
     console.print(f"[green]Imported {len(cases)} cases as query set {qs_id}[/green]")
     console.print("Next: searchprobe run --query-set latest")
+
+
+generate_app = typer.Typer(help="Generate verifiable cases.")
+app.add_typer(generate_app, name="generate")
+
+
+@generate_app.command("wikidata")
+def generate_wikidata(
+    out: Path = typer.Option(DATA_ROOT / "v1" / "wikidata.jsonl", "--out", "-o"),
+    only: str | None = typer.Option(None, "--only", help="Comma-separated spec name prefixes"),
+) -> None:
+    """Build cases whose answers come from Wikidata (answer + negative sets, twins)."""
+    import asyncio
+
+    from searchprobe.cases.generators.wikidata import default_specs, generate
+
+    specs = default_specs()
+    if only:
+        prefixes = tuple(p.strip() for p in only.split(","))
+        specs = [s for s in specs if s.name.startswith(prefixes)]
+    console.print(f"Running {len(specs)} Wikidata generators...")
+    cases, failures = asyncio.run(
+        generate(specs, on_progress=lambda name, n: console.print(f"  {name}: {n} case(s)"))
+    )
+    existing = load_cases(out) if out.exists() else []
+    n = save_cases(merge_cases(existing, cases), out)
+    console.print(f"[green]{len(cases)} cases generated; {out} now holds {n}[/green]")
+    for f in failures:
+        console.print(f"[yellow]  {f}[/yellow]")
+
+
+@generate_app.command("structured")
+def generate_structured_cmd(
+    out: Path = typer.Option(DATA_ROOT / "v1" / "structured.jsonl", "--out", "-o"),
+) -> None:
+    """Build template cases with mechanically checkable constraints (language, pub date)."""
+    from searchprobe.cases.generators.structured import generate_structured
+
+    cases = generate_structured()
+    n = save_cases(cases, out)
+    console.print(f"[green]Wrote {n} cases to {out}[/green]")
+
+
+@generate_app.command("llm")
+def generate_llm(
+    categories: str = typer.Option(..., "--categories", "-c", help="Comma-separated categories"),
+    count: int = typer.Option(10, "--count", "-n", help="Cases per category"),
+    out: Path = typer.Option(DATA_ROOT / "v1" / "llm.jsonl", "--out", "-o"),
+    answerable_with: str | None = typer.Option(
+        None, "--answerable-with", help="Keep only cases this provider can answer (e.g. exa)"
+    ),
+) -> None:
+    """Generate LLM cases with typed constraints and twins (validated; optionally answerable)."""
+    import asyncio
+
+    from searchprobe.cases.generators.llm import check_answerable, generate_llm_cases
+    from searchprobe.llm import get_async_client
+    from searchprobe.queries.taxonomy import AdversarialCategory
+
+    settings = get_settings()
+    if not settings.has_anthropic_configured():
+        console.print("[red]Anthropic credentials required.[/red]")
+        raise typer.Exit(1)
+    client = get_async_client(settings)
+    existing = load_cases(out) if out.exists() else []
+
+    async def run() -> list[TestCase]:
+        produced: list[TestCase] = []
+        for cat in [AdversarialCategory(c.strip()) for c in categories.split(",")]:
+            avoid = [c.text for c in existing if c.category == cat]
+            cases, rejected = await generate_llm_cases(
+                client, settings.generation_model, cat, count, avoid, settings.generation_effort
+            )
+            console.print(f"  {cat.value}: {len(cases)} cases, {len(rejected)} rejected")
+            for r in rejected:
+                console.print(f"[dim]    rejected {r}[/dim]")
+            produced += cases
+        if not answerable_with:
+            return produced
+        from searchprobe.evidence import EvidenceFetcher, EvidenceStore
+        from searchprobe.judging.llm_judge import DocumentJudge
+        from searchprobe.providers.registry import ProviderRegistry
+
+        provider = ProviderRegistry.get_provider(answerable_with, settings)
+        judge = DocumentJudge(client, settings.judge_model, settings.judge_effort)
+        kept: list[TestCase] = []
+        async with EvidenceFetcher(EvidenceStore(settings.database_path)) as fetcher:
+            for case in produced:
+                if case.twin_of:
+                    kept.append(case)  # twins are kept with their base below
+                    continue
+                ok, url = await check_answerable(case, provider, judge, fetcher)
+                if ok:
+                    kept.append(case.model_copy(update={"known_positive_urls": [url]}))
+                else:
+                    console.print(f"[dim]    unanswerable, dropped: {case.text}[/dim]")
+        bases = {c.id for c in kept if not c.twin_of}
+        return [c for c in kept if not c.twin_of or c.twin_of in bases]
+
+    cases = asyncio.run(run())
+    n = save_cases(merge_cases(existing, cases), out)
+    console.print(f"[green]{len(cases)} cases added; {out} now holds {n}[/green]")
+
+
+@app.command("review")
+def review(
+    path: Path = typer.Argument(..., help="JSONL file to review in place"),
+    category: str | None = typer.Option(None, "--category", "-c"),
+) -> None:
+    """Interactively promote cases to gold (g), drop (d), skip (s) or quit (q)."""
+    cases = load_cases(path)
+    by_id = {c.id: c for c in cases}
+    queue = [
+        c
+        for c in cases
+        if c.validation != "gold"
+        and not c.twin_of
+        and (category is None or c.category.value == category)
+    ]
+    for i, case in enumerate(queue, 1):
+        console.rule(f"{i}/{len(queue)} {case.category.value} ({case.provenance.generator})")
+        console.print(f"[bold]{case.text}[/bold]")
+        for c in case.constraints:
+            console.print(f"  {c.id} [{c.type}{'' if c.hard else ', soft'}] {c.describe()}")
+        if case.answer_set:
+            sample = ", ".join(e.label for e in case.answer_set[:12])
+            console.print(f"  answers ({len(case.answer_set)}): {sample}")
+        if case.negative_set:
+            console.print(f"  negatives: {', '.join(e.label for e in case.negative_set[:8])}")
+        for rel, tid in case.twins.items():
+            if tid in by_id:
+                console.print(f"  twin [{rel}]: {by_id[tid].text}")
+        ans = typer.prompt("  (g)old / (d)rop / (s)kip / (q)uit", default="s").strip().lower()
+        if ans == "q":
+            break
+        if ans == "g":
+            by_id[case.id] = case.model_copy(update={"validation": "gold"})
+            for tid in case.twins.values():
+                if tid in by_id:
+                    by_id[tid] = by_id[tid].model_copy(update={"validation": "gold"})
+        elif ans == "d":
+            by_id.pop(case.id, None)
+            for tid in case.twins.values():
+                by_id.pop(tid, None)
+    save_cases(list(by_id.values()), path)
+    console.print(f"[green]Saved {len(by_id)} cases to {path}[/green]")
