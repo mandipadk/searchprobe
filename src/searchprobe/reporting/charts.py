@@ -2,7 +2,6 @@
 
 from typing import Any
 
-import numpy as np
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
@@ -441,10 +440,10 @@ def create_vulnerability_heatmap(
             x=[c.replace("_", " ").title() for c in categories],
             y=models,
             colorscale=[
-                [0, "#2ecc71"],     # Green (low vulnerability)
-                [0.3, "#f1c40f"],   # Yellow
-                [0.6, "#e67e22"],   # Orange
-                [1, "#e74c3c"],     # Red (high vulnerability)
+                [0, "#2ecc71"],  # Green (low vulnerability)
+                [0.3, "#f1c40f"],  # Yellow
+                [0.6, "#e67e22"],  # Orange
+                [1, "#e74c3c"],  # Red (high vulnerability)
             ],
             zmin=0,
             zmax=1,
@@ -452,8 +451,7 @@ def create_vulnerability_heatmap(
             texttemplate="%{text}",
             textfont={"size": 11},
             hovertemplate=(
-                "Model: %{y}<br>Category: %{x}<br>"
-                "Vulnerability: %{z:.3f}<extra></extra>"
+                "Model: %{y}<br>Category: %{x}<br>Vulnerability: %{z:.3f}<extra></extra>"
             ),
             colorbar=dict(title="Vulnerability", tickvals=[0, 0.25, 0.5, 0.75, 1.0]),
         )
@@ -556,9 +554,19 @@ def create_embedding_projection(
     # Group by category
     unique_categories = sorted(set(categories))
     colors = [
-        "#636EFA", "#EF553B", "#00CC96", "#AB63FA", "#FFA15A",
-        "#19D3F3", "#FF6692", "#B6E880", "#FF97FF", "#FECB52",
-        "#1f77b4", "#d62728", "#2ca02c",
+        "#636EFA",
+        "#EF553B",
+        "#00CC96",
+        "#AB63FA",
+        "#FFA15A",
+        "#19D3F3",
+        "#FF6692",
+        "#B6E880",
+        "#FF97FF",
+        "#FECB52",
+        "#1f77b4",
+        "#d62728",
+        "#2ca02c",
     ]
 
     for i, cat in enumerate(unique_categories):
@@ -621,10 +629,7 @@ def create_sensitivity_map_chart(
     scores = [word_scores.get(word, 0.0) for word in words]
 
     # Color scale from green (low) to red (high sensitivity)
-    colors = [
-        f"rgb({int(255 * s)}, {int(255 * (1 - s))}, 50)"
-        for s in scores
-    ]
+    colors = [f"rgb({int(255 * s)}, {int(255 * (1 - s))}, 50)" for s in scores]
 
     fig = go.Figure(
         data=[
@@ -640,7 +645,7 @@ def create_sensitivity_map_chart(
     )
 
     fig.update_layout(
-        title=f"{title}: \"{query}\"",
+        title=f'{title}: "{query}"',
         xaxis_title="Word",
         yaxis_title="Sensitivity Score",
         yaxis=dict(range=[0, 1.2]),
@@ -745,9 +750,19 @@ def create_3d_embedding_explorer(
 
     unique_categories = sorted(set(categories))
     colors = [
-        "#636EFA", "#EF553B", "#00CC96", "#AB63FA", "#FFA15A",
-        "#19D3F3", "#FF6692", "#B6E880", "#FF97FF", "#FECB52",
-        "#1f77b4", "#d62728", "#2ca02c",
+        "#636EFA",
+        "#EF553B",
+        "#00CC96",
+        "#AB63FA",
+        "#FFA15A",
+        "#19D3F3",
+        "#FF6692",
+        "#B6E880",
+        "#FF97FF",
+        "#FECB52",
+        "#1f77b4",
+        "#d62728",
+        "#2ca02c",
     ]
 
     for i, cat in enumerate(unique_categories):

@@ -1,7 +1,5 @@
 """CLI command for embedding geometry analysis."""
 
-from typing import Optional
-
 import typer
 from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn
@@ -19,7 +17,7 @@ def geometry(
         "-m",
         help="Comma-separated embedding model names",
     ),
-    categories: Optional[str] = typer.Option(
+    categories: str | None = typer.Option(
         None,
         "--categories",
         "-c",
@@ -55,9 +53,7 @@ def geometry(
     try:
         analyzer = EmbeddingGeometryAnalyzer(models=model_list)
     except ImportError:
-        console.print(
-            "[red]Error: sentence-transformers is required for geometry analysis.[/red]"
-        )
+        console.print("[red]Error: sentence-transformers is required for geometry analysis.[/red]")
         console.print("Install with: pip install 'searchprobe[analysis]'")
         raise typer.Exit(1)
 
@@ -68,8 +64,12 @@ def geometry(
     ) as progress:
         task = progress.add_task("Analyzing...", total=None)
 
-        def on_progress(model: str, category: str, model_idx: int, cat_idx: int, total: int) -> None:
-            progress.update(task, description=f"Model {model_idx + 1}/{total}: {model} - {category}")
+        def on_progress(
+            model: str, category: str, model_idx: int, cat_idx: int, total: int
+        ) -> None:
+            progress.update(
+                task, description=f"Model {model_idx + 1}/{total}: {model} - {category}"
+            )
 
         report = analyzer.generate_report(
             categories=category_list,
@@ -79,6 +79,7 @@ def geometry(
     # Display results
     if format == "json":
         import json
+
         data = {}
         for model, cats in report.profiles.items():
             data[model] = {cat: prof.to_dict() for cat, prof in cats.items()}
@@ -101,13 +102,13 @@ def geometry(
         else:
             actual_run_id = run_id
 
-        for model, cats in report.profiles.items():
-            for cat, profile in cats.items():
+        for cats in report.profiles.values():
+            for _cat, profile in cats.items():
                 result = profile.to_dict()
                 result["run_id"] = actual_run_id
                 db.add_geometry_result(result)
 
-        console.print(f"[green]Results saved to database[/green]")
+        console.print("[green]Results saved to database[/green]")
 
 
 def _display_table(report: object, classify: object) -> None:

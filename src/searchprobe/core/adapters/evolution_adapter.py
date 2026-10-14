@@ -50,7 +50,8 @@ class EvolutionAdapter:
         seeds = list(self.seed_queries)
         if not seeds:
             from searchprobe.queries.taxonomy import get_example_queries
-            seeds = get_example_queries()[:self.population_size]
+
+            seeds = get_example_queries()[: self.population_size]
 
         config = EvolutionConfig(
             population_size=self.population_size,
@@ -73,16 +74,20 @@ class EvolutionAdapter:
         # Build details and signals
         details = [ind.to_dict() for ind in result.best_individuals[:10]]
 
-        signals = [Signal(
-            type=SignalType.EVOLUTION_COMPLETED,
-            source=self.name,
-            data={
-                "generations": result.generations_completed,
-                "total_evaluations": result.total_evaluations,
-                "best_fitness": result.best_individuals[0].fitness if result.best_individuals else 0.0,
-                "fitness_mode": self.fitness_mode,
-            },
-        )]
+        signals = [
+            Signal(
+                type=SignalType.EVOLUTION_COMPLETED,
+                source=self.name,
+                data={
+                    "generations": result.generations_completed,
+                    "total_evaluations": result.total_evaluations,
+                    "best_fitness": result.best_individuals[0].fitness
+                    if result.best_individuals
+                    else 0.0,
+                    "fitness_mode": self.fitness_mode,
+                },
+            )
+        ]
 
         best_fitness = result.best_individuals[0].fitness if result.best_individuals else 0.0
 

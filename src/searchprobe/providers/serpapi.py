@@ -1,7 +1,7 @@
 """SerpAPI (Google) search provider implementation."""
 
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any, ClassVar
 from urllib.parse import urlparse
 
@@ -105,7 +105,7 @@ class SerpAPIProvider(SearchProvider):
                 results=results,
                 latency_ms=latency_ms,
                 cost_usd=total_cost,
-                timestamp=datetime.now(timezone.utc),
+                timestamp=datetime.now(UTC),
                 metadata={
                     "engine": "google",
                     "results_requested": request.num_results,
@@ -130,6 +130,6 @@ class SerpAPIProvider(SearchProvider):
                 results=[],
                 latency_ms=latency_ms,
                 cost_usd=0.0,
-                timestamp=datetime.now(timezone.utc),
+                timestamp=datetime.now(UTC),
                 error=error_msg,
             )

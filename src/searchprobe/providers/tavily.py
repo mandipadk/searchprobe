@@ -1,7 +1,7 @@
 """Tavily search provider implementation."""
 
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any, ClassVar
 from urllib.parse import urlparse
 
@@ -58,9 +58,7 @@ class TavilyProvider(SearchProvider):
 
             # Execute search (Tavily client is synchronous)
             loop = asyncio.get_event_loop()
-            response = await loop.run_in_executor(
-                None, lambda: self.client.search(**search_kwargs)
-            )
+            response = await loop.run_in_executor(None, lambda: self.client.search(**search_kwargs))
 
             latency_ms = (time.perf_counter() - start_time) * 1000
 
@@ -108,7 +106,7 @@ class TavilyProvider(SearchProvider):
                 results=results,
                 latency_ms=latency_ms,
                 cost_usd=total_cost,
-                timestamp=datetime.now(timezone.utc),
+                timestamp=datetime.now(UTC),
                 metadata={
                     "search_depth": mode,
                     "results_requested": request.num_results,
@@ -132,6 +130,6 @@ class TavilyProvider(SearchProvider):
                 results=[],
                 latency_ms=latency_ms,
                 cost_usd=0.0,
-                timestamp=datetime.now(timezone.utc),
+                timestamp=datetime.now(UTC),
                 error=error_msg,
             )

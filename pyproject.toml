@@ -105,7 +105,20 @@ target-version = "py311"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "N", "W", "UP", "B", "C4", "SIM"]
-ignore = ["E501"]
+ignore = [
+    "E501",   # line length handled by formatter
+    "B008",   # typer.Option() in defaults is the typer idiom
+    "C408",   # dict()/list() calls are fine
+    "UP042",  # str+Enum vs StrEnum changes str() semantics
+    "B905",   # zip(strict=) not required everywhere
+    "SIM105", # contextlib.suppress is not clearer
+    "SIM108", # ternaries are not always clearer
+    "B904",   # `raise typer.Exit` inside except is idiomatic
+    "B027",   # optional no-op hooks on ABCs are intentional
+]
+
+[tool.ruff.lint.per-file-ignores]
+"src/searchprobe/providers/resilient.py" = ["N802"]  # proxies provider ClassVars
 
 [tool.mypy]
 python_version = "3.11"

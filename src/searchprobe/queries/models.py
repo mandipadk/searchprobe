@@ -1,6 +1,6 @@
 """Data models for queries and ground truth."""
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any, Literal
 from uuid import uuid4
 
@@ -75,9 +75,7 @@ class GroundTruth(BaseModel):
     )
 
     # Additional context
-    notes: str | None = Field(
-        default=None, description="Additional notes about ground truth"
-    )
+    notes: str | None = Field(default=None, description="Additional notes about ground truth")
 
 
 class Query(BaseModel):
@@ -95,10 +93,8 @@ class Query(BaseModel):
     ground_truth: GroundTruth | None = Field(
         default=None, description="Ground truth for verification"
     )
-    metadata: dict[str, Any] = Field(
-        default_factory=dict, description="Additional metadata"
-    )
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    metadata: dict[str, Any] = Field(default_factory=dict, description="Additional metadata")
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
     # Why this query is adversarial
     adversarial_reason: str | None = Field(
@@ -113,10 +109,8 @@ class QuerySet(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid4()))
     name: str | None = Field(default=None, description="Human-readable name")
     queries: list[Query] = Field(default_factory=list)
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    config: dict[str, Any] = Field(
-        default_factory=dict, description="Generation configuration"
-    )
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    config: dict[str, Any] = Field(default_factory=dict, description="Generation configuration")
 
     @property
     def total_queries(self) -> int:

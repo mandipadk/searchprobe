@@ -24,7 +24,8 @@ class CorrelationEngine:
         self.classifier = FailureClassifier()
 
     def build_signal_vectors(
-        self, context: Any  # SharedContext
+        self,
+        context: Any,  # SharedContext
     ) -> dict[str, SignalVector]:
         """Extract per-category metrics from all analysis results.
 
@@ -114,6 +115,7 @@ class CorrelationEngine:
                     continue
 
                 from scipy.stats import spearmanr
+
                 rho, p_value = spearmanr(matrix[valid, a], matrix[valid, b])
                 if np.isnan(rho):
                     correlations[dim_names[a]][dim_names[b]] = None
@@ -123,7 +125,8 @@ class CorrelationEngine:
         return correlations
 
     def generate_profiles(
-        self, context: Any  # SharedContext
+        self,
+        context: Any,  # SharedContext
     ) -> list[CategoryIntelligenceProfile]:
         """Generate complete intelligence profiles for all categories.
 
@@ -151,14 +154,16 @@ class CorrelationEngine:
             # Generate recommendations
             recommendations = self._generate_recommendations(cat, vector, failure_modes)
 
-            profiles.append(CategoryIntelligenceProfile(
-                category=cat,
-                signal_vector=vector,
-                primary_failure_modes=[m.value for m in failure_modes],
-                risk_score=risk,
-                correlations=correlations,
-                recommendations=recommendations,
-            ))
+            profiles.append(
+                CategoryIntelligenceProfile(
+                    category=cat,
+                    signal_vector=vector,
+                    primary_failure_modes=[m.value for m in failure_modes],
+                    risk_score=risk,
+                    correlations=correlations,
+                    recommendations=recommendations,
+                )
+            )
 
         # Sort by risk score descending
         profiles.sort(key=lambda p: p.risk_score, reverse=True)
@@ -183,7 +188,9 @@ class CorrelationEngine:
 
         if vector.perturbation_stability is not None:
             # Low stability = high risk
-            weighted_sum += (1.0 - vector.perturbation_stability) * weights["perturbation_stability"]
+            weighted_sum += (1.0 - vector.perturbation_stability) * weights[
+                "perturbation_stability"
+            ]
             total_weight += weights["perturbation_stability"]
 
         if vector.embedding_gap is not None:
@@ -205,7 +212,7 @@ class CorrelationEngine:
 
     def _get_failure_modes(self, context: Any, category: str) -> list[FailureMode]:
         """Extract and classify failure modes for a category."""
-        results = context.results if hasattr(context, "results") else {}
+        context.results if hasattr(context, "results") else {}
         # Look for evaluation data with failure modes
         # This would come from the evaluate stage in a full session
         # For now, return based on signals
@@ -233,7 +240,7 @@ class CorrelationEngine:
         active = [dims[i] for i, v in enumerate(values) if v is not None]
 
         for i, a in enumerate(active):
-            for b in active[i + 1:]:
+            for b in active[i + 1 :]:
                 if a in corr_matrix and b in corr_matrix[a]:
                     rho = corr_matrix[a][b]
                     if rho is not None and abs(rho) > 0.5:

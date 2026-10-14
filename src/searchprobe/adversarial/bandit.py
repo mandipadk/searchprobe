@@ -8,7 +8,6 @@ exploration (trying underused operators) vs exploitation (using the best ones).
 from __future__ import annotations
 
 import math
-import random
 from collections import defaultdict
 
 

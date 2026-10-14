@@ -12,10 +12,11 @@ from __future__ import annotations
 
 import logging
 from collections import defaultdict
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
-from typing import Any, Callable
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -48,7 +49,7 @@ class Signal:
     source: str
     category: str | None = None
     data: dict[str, Any] = field(default_factory=dict)
-    timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    timestamp: datetime = field(default_factory=lambda: datetime.now(UTC))
 
 
 class SignalBus:
@@ -79,9 +80,7 @@ class SignalBus:
             try:
                 handler(signal)
             except Exception:
-                logger.exception(
-                    "Handler %r failed for signal %s", handler, signal.type.value
-                )
+                logger.exception("Handler %r failed for signal %s", handler, signal.type.value)
 
     def clear(self) -> None:
         """Remove all handlers."""

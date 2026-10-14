@@ -8,7 +8,6 @@ from scipy import stats as scipy_stats
 
 from searchprobe.validation.models import CrossEncoderScore, ValidationResult
 
-
 DEFAULT_CROSS_ENCODER = "cross-encoder/ms-marco-MiniLM-L-12-v2"
 
 

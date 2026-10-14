@@ -1,7 +1,5 @@
 """Generate adversarial queries command."""
 
-from typing import Optional
-
 import typer
 from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn
@@ -18,7 +16,7 @@ app = typer.Typer(help="Generate adversarial queries.")
 
 @app.callback(invoke_without_command=True)
 def generate(
-    categories: Optional[str] = typer.Option(
+    categories: str | None = typer.Option(
         None,
         "--categories",
         "-c",
@@ -36,7 +34,7 @@ def generate(
         "-t",
         help="Generation tiers: seed,template,llm (comma-separated)",
     ),
-    name: Optional[str] = typer.Option(
+    name: str | None = typer.Option(
         None,
         "--name",
         help="Name for this query set",
@@ -78,9 +76,7 @@ def generate(
     # Parse categories
     if categories:
         try:
-            category_list = [
-                AdversarialCategory(c.strip()) for c in categories.split(",")
-            ]
+            category_list = [AdversarialCategory(c.strip()) for c in categories.split(",")]
         except ValueError as e:
             console.print(f"[red]Invalid category: {e}[/red]")
             console.print("Use --categories list to see valid options")
@@ -140,9 +136,7 @@ def generate(
 
         # Save to database
         db = Database(settings.database_path)
-        query_set_id = db.create_query_set(
-            name=query_set.name, config=query_set.config
-        )
+        query_set_id = db.create_query_set(name=query_set.name, config=query_set.config)
 
         for query in query_set.queries:
             # Serialize ground truth properly (use mode="json" to handle datetime)
@@ -223,7 +217,9 @@ def _show_dry_run_estimate(
 
     for cat in categories:
         seed_count = len([s for s in seeds if s.category == cat]) if "seed" in tiers else 0
-        template_count = len(TEMPLATES.get(cat, [])) * 3 if "template" in tiers else 0  # ~3 per template
+        template_count = (
+            len(TEMPLATES.get(cat, [])) * 3 if "template" in tiers else 0
+        )  # ~3 per template
         llm_count_cat = llm_count if use_llm and "llm" in tiers else 0
         total = seed_count + template_count + llm_count_cat
         total_all += total
@@ -258,9 +254,7 @@ def _show_summary(query_set) -> None:
         llm = len([q for q in queries if q.tier == "llm"])
 
         if seed + template + llm > 0:
-            table.add_row(
-                cat.value, str(seed), str(template), str(llm), str(len(queries))
-            )
+            table.add_row(cat.value, str(seed), str(template), str(llm), str(len(queries)))
 
     console.print(table)
 
@@ -269,4 +263,6 @@ def _show_summary(query_set) -> None:
     for q in query_set.queries:
         by_tier[q.tier] = by_tier.get(q.tier, 0) + 1
 
-    console.print(f"\nBy tier: Seed={by_tier['seed']}, Template={by_tier['template']}, LLM={by_tier['llm']}")
+    console.print(
+        f"\nBy tier: Seed={by_tier['seed']}, Template={by_tier['template']}, LLM={by_tier['llm']}"
+    )

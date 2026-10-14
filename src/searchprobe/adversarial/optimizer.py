@@ -1,8 +1,9 @@
 """Adversarial query optimizer — evolutionary loop for breeding worst-case queries."""
 
 import random
-from datetime import datetime, timezone
-from typing import Any, Callable
+from collections.abc import Callable
+from datetime import UTC, datetime
+from typing import Any
 
 from searchprobe.adversarial.bandit import OperatorBandit
 from searchprobe.adversarial.crossover import apply_random_crossover
@@ -90,7 +91,7 @@ class AdversarialQueryOptimizer:
                 )
 
         return Population(
-            individuals=individuals[:self.config.population_size],
+            individuals=individuals[: self.config.population_size],
             generation=0,
         )
 
@@ -176,7 +177,7 @@ class AdversarialQueryOptimizer:
         Returns:
             OptimizationResult with best individuals and fitness history
         """
-        started_at = datetime.now(timezone.utc)
+        started_at = datetime.now(UTC)
         fitness_history: list[dict[str, float]] = []
         total_evaluations = 0
 
@@ -184,9 +185,7 @@ class AdversarialQueryOptimizer:
         population = self._initialize_population()
 
         # Evaluate initial population
-        population.individuals = await self.fitness.evaluate_population(
-            population.individuals
-        )
+        population.individuals = await self.fitness.evaluate_population(population.individuals)
         total_evaluations += population.size
 
         for gen in range(self.config.generations):
@@ -219,18 +218,20 @@ class AdversarialQueryOptimizer:
             # Form next generation
             next_gen = elites + offspring
             population = Population(
-                individuals=next_gen[:self.config.population_size],
+                individuals=next_gen[: self.config.population_size],
                 generation=gen + 1,
             )
 
         # Final fitness recording
         fitnesses = [i.fitness for i in population.individuals]
-        fitness_history.append({
-            "generation": self.config.generations,
-            "mean": sum(fitnesses) / len(fitnesses) if fitnesses else 0,
-            "max": max(fitnesses) if fitnesses else 0,
-            "min": min(fitnesses) if fitnesses else 0,
-        })
+        fitness_history.append(
+            {
+                "generation": self.config.generations,
+                "mean": sum(fitnesses) / len(fitnesses) if fitnesses else 0,
+                "max": max(fitnesses) if fitnesses else 0,
+                "min": min(fitnesses) if fitnesses else 0,
+            }
+        )
 
         # Get best individuals
         best = population.top_n(10)
@@ -242,6 +243,6 @@ class AdversarialQueryOptimizer:
             total_cost=0.0,  # Would be tracked by CostTracker in live mode
             fitness_history=fitness_history,
             started_at=started_at,
-            completed_at=datetime.now(timezone.utc),
+            completed_at=datetime.now(UTC),
             config=self.config,
         )

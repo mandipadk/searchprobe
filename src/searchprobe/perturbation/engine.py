@@ -1,7 +1,7 @@
 """Perturbation engine — orchestrates perturbation, search, and stability measurement."""
 
-import asyncio
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 import numpy as np
 
@@ -100,9 +100,7 @@ class PerturbationEngine:
                 perturbed_urls = self._extract_urls(perturbed_response)
 
                 # Compute stability metrics
-                jaccard = jaccard_similarity(
-                    set(original_urls), set(perturbed_urls)
-                )
+                jaccard = jaccard_similarity(set(original_urls), set(perturbed_urls))
                 rbo = rank_biased_overlap(original_urls, perturbed_urls)
 
                 analyses.append(
@@ -154,8 +152,7 @@ class PerturbationEngine:
 
             # Build sensitivity map from word_delete perturbations
             word_delete_analyses = [
-                a for a in analyses
-                if a.perturbation_type == PerturbationType.WORD_DELETE.value
+                a for a in analyses if a.perturbation_type == PerturbationType.WORD_DELETE.value
             ]
             if word_delete_analyses:
                 sm = compute_sensitivity_map(query_text, word_delete_analyses)
@@ -176,7 +173,7 @@ class PerturbationEngine:
 
         # Stability by category
         stability_by_category: dict[str, float] = {}
-        categories = set(a.category for a in all_analyses)
+        categories = {a.category for a in all_analyses}
         for cat in categories:
             cat_analyses = [a for a in all_analyses if a.category == cat]
             if cat_analyses:

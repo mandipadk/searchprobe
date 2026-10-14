@@ -57,7 +57,9 @@ def render(db: Database, run_id: str) -> None:
         st.subheader(f"Category Details — {selected_model}")
 
         cols = st.columns(3)
-        for i, result in enumerate(sorted(model_results, key=lambda x: x.get("vulnerability_score", 0), reverse=True)):
+        for i, result in enumerate(
+            sorted(model_results, key=lambda x: x.get("vulnerability_score", 0), reverse=True)
+        ):
             col = cols[i % 3]
             with col:
                 vuln = result.get("vulnerability_score", 0)
@@ -100,7 +102,9 @@ def render(db: Database, run_id: str) -> None:
             details = pair_details.get("details", []) if isinstance(pair_details, dict) else []
 
             if details:
-                with st.expander(f"{result['category'].replace('_', ' ').title()} — {len(details)} pairs"):
+                with st.expander(
+                    f"{result['category'].replace('_', ' ').title()} — {len(details)} pairs"
+                ):
                     for pair in details:
                         sim = pair.get("similarity", 0)
                         color = "red" if sim > 0.85 else "orange" if sim > 0.7 else "green"

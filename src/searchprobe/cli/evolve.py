@@ -1,11 +1,10 @@
 """CLI command for adversarial query evolution."""
 
 import asyncio
-from typing import Optional
 
 import typer
 from rich.console import Console
-from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn
+from rich.progress import BarColumn, Progress, SpinnerColumn, TaskProgressColumn, TextColumn
 from rich.table import Table
 
 from searchprobe.config import get_settings
@@ -22,7 +21,7 @@ def evolve(
         "-p",
         help="Provider to test against",
     ),
-    mode: Optional[str] = typer.Option(
+    mode: str | None = typer.Option(
         None,
         "--mode",
         help="Search mode (e.g., 'neural', 'auto')",
@@ -51,13 +50,13 @@ def evolve(
         "-f",
         help="Fitness mode: embedding_sim, llm_judge, cross_encoder",
     ),
-    categories: Optional[str] = typer.Option(
+    categories: str | None = typer.Option(
         None,
         "--categories",
         "-c",
         help="Target categories (comma-separated)",
     ),
-    seeds: Optional[str] = typer.Option(
+    seeds: str | None = typer.Option(
         None,
         "--seeds",
         "-s",
@@ -84,7 +83,7 @@ def evolve(
 
         seed_queries = get_example_queries()[:population]
 
-    console.print(f"[blue]Evolving adversarial queries...[/blue]")
+    console.print("[blue]Evolving adversarial queries...[/blue]")
     console.print(f"  Population: {population}")
     console.print(f"  Generations: {generations}")
     console.print(f"  Fitness mode: {fitness_mode}")
@@ -151,24 +150,26 @@ def evolve(
 
     settings = get_settings()
     db = Database(settings.database_path)
-    db.add_evolution_result({
-        "fitness_mode": fitness_mode,
-        "provider": provider,
-        "generations_completed": result.generations_completed,
-        "total_evaluations": result.total_evaluations,
-        "total_cost": result.total_cost,
-        "best_individuals": [i.to_dict() for i in result.best_individuals],
-        "fitness_history": result.fitness_history,
-        "config": {
-            "population_size": population,
-            "generations": generations,
-            "budget_limit": budget,
+    db.add_evolution_result(
+        {
             "fitness_mode": fitness_mode,
-        },
-    })
+            "provider": provider,
+            "generations_completed": result.generations_completed,
+            "total_evaluations": result.total_evaluations,
+            "total_cost": result.total_cost,
+            "best_individuals": [i.to_dict() for i in result.best_individuals],
+            "fitness_history": result.fitness_history,
+            "config": {
+                "population_size": population,
+                "generations": generations,
+                "budget_limit": budget,
+                "fitness_mode": fitness_mode,
+            },
+        }
+    )
 
     # Display results
-    console.print(f"\n[green]Evolution complete![/green]")
+    console.print("\n[green]Evolution complete![/green]")
     console.print(f"  Generations: {result.generations_completed}")
     console.print(f"  Total evaluations: {result.total_evaluations}")
 
@@ -197,13 +198,15 @@ def evolve(
         first = result.fitness_history[0]
         last = result.fitness_history[-1]
         console.print(f"  Gen 0:  mean={first['mean']:.3f}, max={first['max']:.3f}")
-        console.print(f"  Gen {result.generations_completed}: mean={last['mean']:.3f}, max={last['max']:.3f}")
+        console.print(
+            f"  Gen {result.generations_completed}: mean={last['mean']:.3f}, max={last['max']:.3f}"
+        )
         improvement = last["max"] - first["max"]
         console.print(f"  Improvement: +{improvement:.3f}")
 
     # Show mutation history for best query
     best = result.best_individuals[0] if result.best_individuals else None
     if best and best.mutation_history:
-        console.print(f"\n[bold]Best Query Mutation History[/bold]")
+        console.print("\n[bold]Best Query Mutation History[/bold]")
         for j, mutation in enumerate(best.mutation_history):
             console.print(f"  {j + 1}. {mutation}")

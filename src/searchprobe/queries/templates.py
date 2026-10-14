@@ -2,7 +2,6 @@
 
 import itertools
 import random
-from typing import Any
 
 from pydantic import BaseModel
 
@@ -335,9 +334,7 @@ def generate_from_template(template: QueryTemplate, slot_values: dict[str, str])
             if isinstance(value, str):
                 gt_dict[key] = value.format(**slot_values)
             elif isinstance(value, list):
-                gt_dict[key] = [
-                    v.format(**slot_values) if isinstance(v, str) else v for v in value
-                ]
+                gt_dict[key] = [v.format(**slot_values) if isinstance(v, str) else v for v in value]
 
         ground_truth = GroundTruth(**gt_dict)
 

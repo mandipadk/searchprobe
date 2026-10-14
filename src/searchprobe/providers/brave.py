@@ -1,7 +1,7 @@
 """Brave Search API provider implementation."""
 
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any, ClassVar
 from urllib.parse import urlparse
 
@@ -109,7 +109,7 @@ class BraveProvider(SearchProvider):
                 results=results,
                 latency_ms=latency_ms,
                 cost_usd=total_cost,
-                timestamp=datetime.now(timezone.utc),
+                timestamp=datetime.now(UTC),
                 metadata={
                     "results_requested": request.num_results,
                     "results_returned": len(results),
@@ -117,7 +117,7 @@ class BraveProvider(SearchProvider):
             )
 
         except httpx.HTTPStatusError as e:
-            from searchprobe.core.exceptions import ProviderError, RateLimitError
+            from searchprobe.core.exceptions import RateLimitError
 
             latency_ms = (time.perf_counter() - start_time) * 1000
             if e.response.status_code == 429:
@@ -129,7 +129,7 @@ class BraveProvider(SearchProvider):
                 results=[],
                 latency_ms=latency_ms,
                 cost_usd=0.0,
-                timestamp=datetime.now(timezone.utc),
+                timestamp=datetime.now(UTC),
                 error=str(e),
             )
         except Exception as e:
@@ -141,7 +141,7 @@ class BraveProvider(SearchProvider):
                 results=[],
                 latency_ms=latency_ms,
                 cost_usd=0.0,
-                timestamp=datetime.now(timezone.utc),
+                timestamp=datetime.now(UTC),
                 error=str(e),
             )
 

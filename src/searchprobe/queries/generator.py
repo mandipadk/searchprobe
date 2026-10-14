@@ -1,19 +1,17 @@
 """LLM-based query generation for creative adversarial probing."""
 
-import json
 from typing import Any
 
 from pydantic import BaseModel
 
 from searchprobe.config import get_anthropic_client, get_settings
 from searchprobe.queries.models import GroundTruth, Query, QuerySet
-from searchprobe.queries.seeds import get_builtin_seeds, load_all_seeds
+from searchprobe.queries.seeds import load_all_seeds
 from searchprobe.queries.taxonomy import (
     AdversarialCategory,
     CategoryMetadata,
     get_category_metadata,
 )
-from searchprobe.queries.templates import generate_all as generate_all_templates
 
 
 class GeneratedQueryResponse(BaseModel):
@@ -258,9 +256,7 @@ class QueryGenerator:
         }
         return explanations.get(metadata.category, metadata.failure_hypothesis)
 
-    async def generate_all_categories(
-        self, count_per_category: int = 10
-    ) -> list[Query]:
+    async def generate_all_categories(self, count_per_category: int = 10) -> list[Query]:
         """Generate queries for all categories."""
         all_queries = []
 
@@ -343,9 +339,7 @@ def generate_query_set(
                 except Exception as e:
                     print(f"  Error generating for {category.value}: {e}")
 
-            print(
-                f"  Added {len([q for q in query_set.queries if q.tier == 'llm'])} LLM queries"
-            )
+            print(f"  Added {len([q for q in query_set.queries if q.tier == 'llm'])} LLM queries")
 
     # Set config
     query_set.config = {

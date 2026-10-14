@@ -1,15 +1,15 @@
 """Pipeline runner for orchestrating benchmark execution."""
 
 import asyncio
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from typing import Any, Callable
+from datetime import UTC, datetime
+from typing import Any
 
 from searchprobe.config import Settings, get_settings
-from searchprobe.core.exceptions import BudgetExhaustedError, PipelineError, ProviderError
+from searchprobe.core.exceptions import BudgetExhaustedError, PipelineError
 from searchprobe.pipeline.cost_tracker import CostTracker
 from searchprobe.pipeline.rate_limiter import RateLimiterPool
-from searchprobe.providers.base import SearchProvider
 from searchprobe.providers.models import SearchRequest, SearchResponse
 from searchprobe.providers.registry import ProviderRegistry
 from searchprobe.providers.resilient import ResilientProvider
@@ -92,9 +92,7 @@ class BenchmarkRunner:
         # Progress callback
         self._progress_callback: Callable[[str, int, int], None] | None = None
 
-    def set_progress_callback(
-        self, callback: Callable[[str, int, int], None]
-    ) -> None:
+    def set_progress_callback(self, callback: Callable[[str, int, int], None]) -> None:
         """Set a callback for progress updates.
 
         Args:
@@ -125,7 +123,7 @@ class BenchmarkRunner:
         Returns:
             BenchmarkResult with all responses
         """
-        started_at = datetime.now(timezone.utc)
+        started_at = datetime.now(UTC)
 
         # Create run in database if not provided
         if run_id is None:
@@ -208,7 +206,7 @@ class BenchmarkRunner:
                 pass
 
         # Complete run
-        completed_at = datetime.now(timezone.utc)
+        completed_at = datetime.now(UTC)
         self.db.complete_run(
             run_id,
             self.cost_tracker.get_total(),

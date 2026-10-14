@@ -1,16 +1,15 @@
 """Evaluate benchmark command."""
 
 import asyncio
-from typing import Optional
 
 import typer
 from rich.console import Console
-from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn
+from rich.progress import BarColumn, Progress, SpinnerColumn, TaskProgressColumn, TextColumn
 from rich.table import Table
 
 from searchprobe.config import get_settings
 from searchprobe.evaluation.judge import SearchJudge
-from searchprobe.evaluation.statistics import summary_statistics, compare_providers
+from searchprobe.evaluation.statistics import compare_providers, summary_statistics
 from searchprobe.providers.models import SearchResponse, SearchResult
 from searchprobe.storage import Database
 
@@ -26,19 +25,19 @@ def evaluate(
         "-r",
         help="Run ID to evaluate (or 'latest')",
     ),
-    max_results: Optional[int] = typer.Option(
+    max_results: int | None = typer.Option(
         None,
         "--max-results",
         "-n",
         help="Maximum number of results to evaluate",
     ),
-    categories: Optional[str] = typer.Option(
+    categories: str | None = typer.Option(
         None,
         "--categories",
         "-c",
         help="Comma-separated categories to evaluate (default: all)",
     ),
-    providers: Optional[str] = typer.Option(
+    providers: str | None = typer.Option(
         None,
         "--providers",
         "-p",
@@ -91,16 +90,12 @@ def evaluate(
     # Filter by category if specified
     if categories:
         category_list = [c.strip().lower() for c in categories.split(",")]
-        results_to_eval = [
-            r for r in results_to_eval if r["category"] in category_list
-        ]
+        results_to_eval = [r for r in results_to_eval if r["category"] in category_list]
 
     # Filter by provider if specified
     if providers:
         provider_list = [p.strip().lower() for p in providers.split(",")]
-        results_to_eval = [
-            r for r in results_to_eval if r["provider"] in provider_list
-        ]
+        results_to_eval = [r for r in results_to_eval if r["provider"] in provider_list]
 
     if not results_to_eval:
         console.print("[yellow]No results to evaluate.[/yellow]")
@@ -117,13 +112,15 @@ def evaluate(
     eval_batch = []
     for result_item in results_to_eval:
         search_response = _reconstruct_response(result_item)
-        eval_batch.append({
-            "query_id": result_item["query_id"],
-            "query_text": result_item["query_text"],
-            "category": result_item["category"],
-            "search_response": search_response,
-            "ground_truth": result_item.get("ground_truth"),
-        })
+        eval_batch.append(
+            {
+                "query_id": result_item["query_id"],
+                "query_text": result_item["query_text"],
+                "category": result_item["category"],
+                "search_response": search_response,
+                "ground_truth": result_item.get("ground_truth"),
+            }
+        )
 
     # Evaluate concurrently with progress
     all_evaluations = []
@@ -272,7 +269,7 @@ def _display_summary(evaluations: list[dict], show_comparisons: bool) -> None:
 
         providers = list(stats["by_provider"].keys())
         for i, prov_a in enumerate(providers):
-            for prov_b in providers[i + 1:]:
+            for prov_b in providers[i + 1 :]:
                 # Get scores for comparison
                 scores_a = [
                     e["weighted_score"]
@@ -286,9 +283,7 @@ def _display_summary(evaluations: list[dict], show_comparisons: bool) -> None:
                 ]
 
                 if scores_a and scores_b:
-                    comparison = compare_providers(
-                        prov_a, scores_a, prov_b, scores_b, paired=False
-                    )
+                    comparison = compare_providers(prov_a, scores_a, prov_b, scores_b, paired=False)
 
                     sig_marker = "*" if comparison.significant else ""
                     winner = prov_a if comparison.mean_diff > 0 else prov_b

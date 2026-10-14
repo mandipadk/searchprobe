@@ -25,9 +25,8 @@ class GeometryAdapter:
     def _get_analyzer(self) -> Any:
         if self._analyzer is None:
             from searchprobe.geometry.analyzer import EmbeddingGeometryAnalyzer
-            self._analyzer = EmbeddingGeometryAnalyzer(
-                models=self.models, device=self.device
-            )
+
+            self._analyzer = EmbeddingGeometryAnalyzer(models=self.models, device=self.device)
         return self._analyzer
 
     async def analyze(
@@ -50,31 +49,35 @@ class GeometryAdapter:
             for cat_name, profile in profiles.items():
                 vuln = profile.vulnerability_score or 0.0
                 all_vuln.append(vuln)
-                details.append({
-                    "model": model_name,
-                    "category": cat_name,
-                    "vulnerability_score": vuln,
-                    "collapse_ratio": profile.collapse_ratio,
-                    "intrinsic_dimensionality": profile.intrinsic_dimensionality,
-                    "isotropy_score": profile.isotropy_score,
-                    "mean_adversarial_sim": profile.mean_adversarial_sim,
-                })
+                details.append(
+                    {
+                        "model": model_name,
+                        "category": cat_name,
+                        "vulnerability_score": vuln,
+                        "collapse_ratio": profile.collapse_ratio,
+                        "intrinsic_dimensionality": profile.intrinsic_dimensionality,
+                        "isotropy_score": profile.isotropy_score,
+                        "mean_adversarial_sim": profile.mean_adversarial_sim,
+                    }
+                )
 
                 if vuln > max_vuln:
                     max_vuln = vuln
                     most_vulnerable = cat_name
 
                 if vuln > 0.5:
-                    signals.append(Signal(
-                        type=SignalType.VULNERABILITY_DETECTED,
-                        source=self.name,
-                        category=cat_name,
-                        data={
-                            "vulnerability_score": vuln,
-                            "model": model_name,
-                            "collapse_ratio": profile.collapse_ratio,
-                        },
-                    ))
+                    signals.append(
+                        Signal(
+                            type=SignalType.VULNERABILITY_DETECTED,
+                            source=self.name,
+                            category=cat_name,
+                            data={
+                                "vulnerability_score": vuln,
+                                "model": model_name,
+                                "collapse_ratio": profile.collapse_ratio,
+                            },
+                        )
+                    )
 
         mean_vuln = sum(all_vuln) / len(all_vuln) if all_vuln else 0.0
         analyzed_cats = list({d["category"] for d in details})

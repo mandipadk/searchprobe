@@ -51,9 +51,7 @@ def render(db: Database, run_id: str) -> None:
             category_improvements[cat] = []
         category_improvements[cat].append(r.get("ndcg_improvement", 0))
 
-    mean_by_category = {
-        cat: float(np.mean(imps)) for cat, imps in category_improvements.items()
-    }
+    mean_by_category = {cat: float(np.mean(imps)) for cat, imps in category_improvements.items()}
 
     fig = create_embedding_gap_chart(mean_by_category)
     st.plotly_chart(fig, use_container_width=True)
@@ -93,10 +91,8 @@ def render(db: Database, run_id: str) -> None:
     st.subheader("Detailed Validation Results")
     for r in validation_results[:20]:
         imp = r.get("ndcg_improvement", 0)
-        color = "red" if imp > 0.2 else "orange" if imp > 0.1 else "green"
         with st.expander(
-            f"[{r.get('provider', '?')}] {r.get('category', '?')} — "
-            f"NDCG gap: {imp:.1%}"
+            f"[{r.get('provider', '?')}] {r.get('category', '?')} — NDCG gap: {imp:.1%}"
         ):
             col1, col2, col3 = st.columns(3)
             with col1:

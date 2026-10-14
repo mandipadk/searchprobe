@@ -1,7 +1,6 @@
 """Report generator for benchmark results."""
 
-import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -10,19 +9,17 @@ from jinja2 import Environment, PackageLoader, select_autoescape
 
 from searchprobe.config import Settings, get_settings
 from searchprobe.evaluation.statistics import (
-    summary_statistics,
     aggregate_by_category,
-    aggregate_by_provider,
-    failure_mode_frequency,
+    summary_statistics,
 )
 from searchprobe.reporting.charts import (
-    create_radar_chart,
-    create_heatmap,
     create_bar_chart,
-    create_failure_mode_chart,
     create_cost_breakdown,
-    create_vulnerability_heatmap,
     create_embedding_gap_chart,
+    create_failure_mode_chart,
+    create_heatmap,
+    create_radar_chart,
+    create_vulnerability_heatmap,
 )
 from searchprobe.storage import Database
 
@@ -80,21 +77,31 @@ class ReportGenerator:
         evaluations = db.get_evaluations(run_id)
 
         # Calculate statistics
-        stats = summary_statistics([{
-            "category": e.get("category"),
-            "provider": e.get("provider"),
-            "search_mode": e.get("search_mode"),
-            "weighted_score": e.get("weighted_score", 0),
-            "failure_modes": e.get("failure_modes", []),
-        } for e in evaluations])
+        stats = summary_statistics(
+            [
+                {
+                    "category": e.get("category"),
+                    "provider": e.get("provider"),
+                    "search_mode": e.get("search_mode"),
+                    "weighted_score": e.get("weighted_score", 0),
+                    "failure_modes": e.get("failure_modes", []),
+                }
+                for e in evaluations
+            ]
+        )
 
         # Build provider -> category -> score mapping for charts
-        by_category = aggregate_by_category([{
-            "category": e.get("category"),
-            "provider": e.get("provider"),
-            "search_mode": e.get("search_mode"),
-            "weighted_score": e.get("weighted_score", 0),
-        } for e in evaluations])
+        by_category = aggregate_by_category(
+            [
+                {
+                    "category": e.get("category"),
+                    "provider": e.get("provider"),
+                    "search_mode": e.get("search_mode"),
+                    "weighted_score": e.get("weighted_score", 0),
+                }
+                for e in evaluations
+            ]
+        )
 
         chart_data: dict[str, dict[str, float]] = {}
         for category, providers in by_category.items():
@@ -140,7 +147,11 @@ class ReportGenerator:
                 if cat not in cat_scores:
                     cat_scores[cat] = []
                 cat_scores[cat].append(r.get("vulnerability_score", 0) or 0)
-            most_vulnerable_cat = max(cat_scores, key=lambda c: sum(cat_scores[c]) / len(cat_scores[c])) if cat_scores else "N/A"
+            most_vulnerable_cat = (
+                max(cat_scores, key=lambda c: sum(cat_scores[c]) / len(cat_scores[c]))
+                if cat_scores
+                else "N/A"
+            )
 
             geometry_data = {
                 "vulnerability_map": vulnerability_map,
@@ -179,7 +190,9 @@ class ReportGenerator:
             category_means = {cat: sum(s) / len(s) for cat, s in category_scores.items()}
             mean_jaccard = sum(all_jaccard) / len(all_jaccard) if all_jaccard else 0
             mean_rbo = sum(all_rbo) / len(all_rbo) if all_rbo else 0
-            least_stable_op = min(operator_means, key=operator_means.get) if operator_means else "N/A"
+            least_stable_op = (
+                min(operator_means, key=operator_means.get) if operator_means else "N/A"
+            )
 
             perturbation_data = {
                 "operator_means": operator_means,
@@ -213,7 +226,9 @@ class ReportGenerator:
                 provider_data[prov]["original_ndcg"].append(r.get("original_ndcg", 0) or 0)
                 provider_data[prov]["reranked_ndcg"].append(r.get("reranked_ndcg", 0) or 0)
 
-            category_improvement_means = {cat: sum(v) / len(v) for cat, v in cat_improvements.items()}
+            category_improvement_means = {
+                cat: sum(v) / len(v) for cat, v in cat_improvements.items()
+            }
             mean_ndcg_imp = sum(all_ndcg_imp) / len(all_ndcg_imp) if all_ndcg_imp else 0
             max_ndcg_imp = max(all_ndcg_imp) if all_ndcg_imp else 0
             mean_tau = sum(all_tau) / len(all_tau) if all_tau else 0
@@ -265,7 +280,7 @@ class ReportGenerator:
             "perturbation_data": perturbation_data,
             "validation_data": validation_data,
             "evolution_data": evolution_data,
-            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "generated_at": datetime.now(UTC).isoformat(),
         }
 
     def _get_failure_examples(
@@ -281,13 +296,15 @@ class ReportGenerator:
                 if category not in failures:
                     failures[category] = []
                 if len(failures[category]) < max_per_category:
-                    failures[category].append({
-                        "query": e.get("query_text", ""),
-                        "provider": e.get("provider", ""),
-                        "score": e.get("weighted_score", 0),
-                        "failure_modes": e.get("failure_modes", []),
-                        "assessment": e.get("reasoning", ""),
-                    })
+                    failures[category].append(
+                        {
+                            "query": e.get("query_text", ""),
+                            "provider": e.get("provider", ""),
+                            "score": e.get("weighted_score", 0),
+                            "failure_modes": e.get("failure_modes", []),
+                            "assessment": e.get("reasoning", ""),
+                        }
+                    )
 
         return failures
 
@@ -297,7 +314,7 @@ class ReportGenerator:
         run_stats = data.get("run_stats", {})
 
         lines = [
-            f"# SearchProbe Benchmark Report",
+            "# SearchProbe Benchmark Report",
             "",
             f"**Run ID:** `{run_id[:8]}...`",
             f"**Generated:** {data['generated_at']}",
@@ -305,32 +322,38 @@ class ReportGenerator:
         ]
 
         if run_stats:
-            lines.extend([
-                "## Run Summary",
-                "",
-                f"- **Started:** {run_stats.get('started_at', 'N/A')}",
-                f"- **Completed:** {run_stats.get('completed_at', 'N/A')}",
-                f"- **Total Cost:** ${run_stats.get('cost_total', 0):.4f}",
-                "",
-            ])
+            lines.extend(
+                [
+                    "## Run Summary",
+                    "",
+                    f"- **Started:** {run_stats.get('started_at', 'N/A')}",
+                    f"- **Completed:** {run_stats.get('completed_at', 'N/A')}",
+                    f"- **Total Cost:** ${run_stats.get('cost_total', 0):.4f}",
+                    "",
+                ]
+            )
 
-        lines.extend([
-            "## Overall Statistics",
-            "",
-            f"- **Total Evaluated:** {stats.get('count', 0)}",
-            f"- **Mean Score:** {stats.get('mean', 0):.3f}",
-            f"- **Median Score:** {stats.get('median', 0):.3f}",
-            f"- **Std Deviation:** {stats.get('std', 0):.3f}",
-            "",
-        ])
+        lines.extend(
+            [
+                "## Overall Statistics",
+                "",
+                f"- **Total Evaluated:** {stats.get('count', 0)}",
+                f"- **Mean Score:** {stats.get('mean', 0):.3f}",
+                f"- **Median Score:** {stats.get('median', 0):.3f}",
+                f"- **Std Deviation:** {stats.get('std', 0):.3f}",
+                "",
+            ]
+        )
 
         if stats.get("by_provider"):
-            lines.extend([
-                "## Scores by Provider",
-                "",
-                "| Provider | Mean | 95% CI | n |",
-                "|----------|------|--------|---|",
-            ])
+            lines.extend(
+                [
+                    "## Scores by Provider",
+                    "",
+                    "| Provider | Mean | 95% CI | n |",
+                    "|----------|------|--------|---|",
+                ]
+            )
             for provider, ci in stats["by_provider"].items():
                 lines.append(
                     f"| {provider} | {ci.mean:.3f} | [{ci.lower:.3f}, {ci.upper:.3f}] | {ci.n} |"
@@ -361,14 +384,16 @@ class ReportGenerator:
         # Geometry section
         if data.get("geometry_data"):
             gd = data["geometry_data"]
-            lines.extend([
-                "## Embedding Geometry Analysis",
-                "",
-                f"- **Models Analyzed:** {gd['num_models']}",
-                f"- **Mean Vulnerability:** {gd['mean_vulnerability']:.3f}",
-                f"- **Most Vulnerable Category:** {gd['most_vulnerable_category']}",
-                "",
-            ])
+            lines.extend(
+                [
+                    "## Embedding Geometry Analysis",
+                    "",
+                    f"- **Models Analyzed:** {gd['num_models']}",
+                    f"- **Mean Vulnerability:** {gd['mean_vulnerability']:.3f}",
+                    f"- **Most Vulnerable Category:** {gd['most_vulnerable_category']}",
+                    "",
+                ]
+            )
             if gd["vulnerability_map"]:
                 cats = gd["categories"]
                 models = gd["models"]
@@ -386,22 +411,38 @@ class ReportGenerator:
         # Perturbation section
         if data.get("perturbation_data"):
             pd = data["perturbation_data"]
-            lines.extend([
-                "## Perturbation Robustness",
-                "",
-                f"- **Total Perturbations:** {pd['total_perturbations']}",
-                f"- **Mean Jaccard:** {pd['mean_jaccard']:.3f}",
-                f"- **Mean RBO:** {pd['mean_rbo']:.3f}",
-                f"- **Least Stable Operator:** {pd['least_stable_operator']}",
-                "",
-            ])
+            lines.extend(
+                [
+                    "## Perturbation Robustness",
+                    "",
+                    f"- **Total Perturbations:** {pd['total_perturbations']}",
+                    f"- **Mean Jaccard:** {pd['mean_jaccard']:.3f}",
+                    f"- **Mean RBO:** {pd['mean_rbo']:.3f}",
+                    f"- **Least Stable Operator:** {pd['least_stable_operator']}",
+                    "",
+                ]
+            )
             if pd["operator_means"]:
-                lines.extend(["### Stability by Operator", "", "| Operator | Mean Jaccard |", "|----------|-------------|"])
+                lines.extend(
+                    [
+                        "### Stability by Operator",
+                        "",
+                        "| Operator | Mean Jaccard |",
+                        "|----------|-------------|",
+                    ]
+                )
                 for op, score in sorted(pd["operator_means"].items(), key=lambda x: x[1]):
                     lines.append(f"| {op.replace('_', ' ').title()} | {score:.3f} |")
                 lines.append("")
             if pd["category_means"]:
-                lines.extend(["### Stability by Category", "", "| Category | Mean Jaccard |", "|----------|-------------|"])
+                lines.extend(
+                    [
+                        "### Stability by Category",
+                        "",
+                        "| Category | Mean Jaccard |",
+                        "|----------|-------------|",
+                    ]
+                )
                 for cat, score in sorted(pd["category_means"].items(), key=lambda x: x[1]):
                     lines.append(f"| {cat.replace('_', ' ').title()} | {score:.3f} |")
                 lines.append("")
@@ -409,40 +450,69 @@ class ReportGenerator:
         # Validation section
         if data.get("validation_data"):
             vd = data["validation_data"]
-            lines.extend([
-                "## Cross-Encoder Validation",
-                "",
-                f"- **Mean NDCG Improvement:** {vd['mean_ndcg_improvement']:.3f}",
-                f"- **Max NDCG Improvement:** {vd['max_ndcg_improvement']:.3f}",
-                f"- **Mean Kendall's Tau:** {vd['mean_kendall_tau']:.3f}",
-                f"- **Queries Validated:** {vd['queries_validated']}",
-                "",
-            ])
+            lines.extend(
+                [
+                    "## Cross-Encoder Validation",
+                    "",
+                    f"- **Mean NDCG Improvement:** {vd['mean_ndcg_improvement']:.3f}",
+                    f"- **Max NDCG Improvement:** {vd['max_ndcg_improvement']:.3f}",
+                    f"- **Mean Kendall's Tau:** {vd['mean_kendall_tau']:.3f}",
+                    f"- **Queries Validated:** {vd['queries_validated']}",
+                    "",
+                ]
+            )
             if vd["category_improvements"]:
-                lines.extend(["### NDCG Improvement by Category", "", "| Category | Mean Improvement |", "|----------|-----------------|"])
-                for cat, imp in sorted(vd["category_improvements"].items(), key=lambda x: x[1], reverse=True):
+                lines.extend(
+                    [
+                        "### NDCG Improvement by Category",
+                        "",
+                        "| Category | Mean Improvement |",
+                        "|----------|-----------------|",
+                    ]
+                )
+                for cat, imp in sorted(
+                    vd["category_improvements"].items(), key=lambda x: x[1], reverse=True
+                ):
                     lines.append(f"| {cat.replace('_', ' ').title()} | {imp:.3f} |")
                 lines.append("")
             if vd["provider_means"]:
-                lines.extend(["### Provider Comparison", "", "| Provider | Original NDCG | Reranked NDCG |", "|----------|--------------|---------------|"])
+                lines.extend(
+                    [
+                        "### Provider Comparison",
+                        "",
+                        "| Provider | Original NDCG | Reranked NDCG |",
+                        "|----------|--------------|---------------|",
+                    ]
+                )
                 for prov, means in vd["provider_means"].items():
-                    lines.append(f"| {prov} | {means['original_ndcg']:.3f} | {means['reranked_ndcg']:.3f} |")
+                    lines.append(
+                        f"| {prov} | {means['original_ndcg']:.3f} | {means['reranked_ndcg']:.3f} |"
+                    )
                 lines.append("")
 
         # Evolution section
         if data.get("evolution_data"):
             ed = data["evolution_data"]
-            lines.extend([
-                "## Adversarial Evolution",
-                "",
-                f"- **Generations:** {ed['generations']}",
-                f"- **Total Evaluations:** {ed['total_evaluations']}",
-                f"- **Best Fitness:** {ed['best_fitness']:.3f}",
-                f"- **Fitness Mode:** {ed['fitness_mode']}",
-                "",
-            ])
+            lines.extend(
+                [
+                    "## Adversarial Evolution",
+                    "",
+                    f"- **Generations:** {ed['generations']}",
+                    f"- **Total Evaluations:** {ed['total_evaluations']}",
+                    f"- **Best Fitness:** {ed['best_fitness']:.3f}",
+                    f"- **Fitness Mode:** {ed['fitness_mode']}",
+                    "",
+                ]
+            )
             if ed["best_individuals"]:
-                lines.extend(["### Top Evolved Queries", "", "| # | Query | Fitness | Category | Mutations |", "|---|-------|---------|----------|-----------|"])
+                lines.extend(
+                    [
+                        "### Top Evolved Queries",
+                        "",
+                        "| # | Query | Fitness | Category | Mutations |",
+                        "|---|-------|---------|----------|-----------|",
+                    ]
+                )
                 for i, ind in enumerate(ed["best_individuals"][:10]):
                     query = ind.get("query", "")[:50]
                     fitness = ind.get("fitness", 0)
@@ -515,7 +585,9 @@ class ReportGenerator:
         if data.get("geometry_data"):
             vuln_map = data["geometry_data"]["vulnerability_map"]
             vuln_heatmap = create_vulnerability_heatmap(vuln_map)
-            charts_html["geometry_heatmap"] = vuln_heatmap.to_html(full_html=False, include_plotlyjs=False)
+            charts_html["geometry_heatmap"] = vuln_heatmap.to_html(
+                full_html=False, include_plotlyjs=False
+            )
 
         # --- Perturbation charts ---
         if data.get("perturbation_data"):
@@ -526,35 +598,55 @@ class ReportGenerator:
                 op_labels = [op.replace("_", " ").title() for op, _ in sorted_ops]
                 op_values = [v for _, v in sorted_ops]
                 op_colors = [
-                    "#ef4444" if v < 0.3 else "#f59e0b" if v < 0.6 else "#22c55e"
-                    for v in op_values
+                    "#ef4444" if v < 0.3 else "#f59e0b" if v < 0.6 else "#22c55e" for v in op_values
                 ]
-                fig = go.Figure(data=[go.Bar(
-                    x=op_labels, y=op_values, marker_color=op_colors,
-                    text=[f"{v:.2f}" for v in op_values], textposition="outside",
-                )])
+                fig = go.Figure(
+                    data=[
+                        go.Bar(
+                            x=op_labels,
+                            y=op_values,
+                            marker_color=op_colors,
+                            text=[f"{v:.2f}" for v in op_values],
+                            textposition="outside",
+                        )
+                    ]
+                )
                 fig.update_layout(
                     title="Stability by Perturbation Operator",
                     yaxis=dict(range=[0, 1], title="Mean Jaccard Similarity"),
-                    height=400, width=700,
+                    height=400,
+                    width=700,
                 )
-                charts_html["perturbation_operator"] = fig.to_html(full_html=False, include_plotlyjs=False)
+                charts_html["perturbation_operator"] = fig.to_html(
+                    full_html=False, include_plotlyjs=False
+                )
 
             # Category stability bar chart
             if pd["category_means"]:
                 sorted_cats = sorted(pd["category_means"].items(), key=lambda x: x[1])
                 cat_labels = [c.replace("_", " ").title() for c, _ in sorted_cats]
                 cat_values = [v for _, v in sorted_cats]
-                fig = go.Figure(data=[go.Bar(
-                    x=cat_labels, y=cat_values, marker_color="#6366f1",
-                    text=[f"{v:.2f}" for v in cat_values], textposition="outside",
-                )])
+                fig = go.Figure(
+                    data=[
+                        go.Bar(
+                            x=cat_labels,
+                            y=cat_values,
+                            marker_color="#6366f1",
+                            text=[f"{v:.2f}" for v in cat_values],
+                            textposition="outside",
+                        )
+                    ]
+                )
                 fig.update_layout(
                     title="Stability by Category",
                     yaxis=dict(range=[0, 1], title="Mean Jaccard Similarity"),
-                    xaxis=dict(tickangle=-45), height=400, width=700,
+                    xaxis=dict(tickangle=-45),
+                    height=400,
+                    width=700,
                 )
-                charts_html["perturbation_category"] = fig.to_html(full_html=False, include_plotlyjs=False)
+                charts_html["perturbation_category"] = fig.to_html(
+                    full_html=False, include_plotlyjs=False
+                )
 
         # --- Validation charts ---
         if data.get("validation_data"):
@@ -562,23 +654,33 @@ class ReportGenerator:
             # NDCG improvement by category
             if vd["category_improvements"]:
                 gap_chart = create_embedding_gap_chart(vd["category_improvements"])
-                charts_html["validation_ndcg"] = gap_chart.to_html(full_html=False, include_plotlyjs=False)
+                charts_html["validation_ndcg"] = gap_chart.to_html(
+                    full_html=False, include_plotlyjs=False
+                )
 
             # Provider comparison grouped bar
             if vd["provider_means"]:
                 provs = list(vd["provider_means"].keys())
                 orig_vals = [vd["provider_means"][p]["original_ndcg"] for p in provs]
                 reranked_vals = [vd["provider_means"][p]["reranked_ndcg"] for p in provs]
-                fig = go.Figure(data=[
-                    go.Bar(name="Original NDCG", x=provs, y=orig_vals, marker_color="#94a3b8"),
-                    go.Bar(name="Reranked NDCG", x=provs, y=reranked_vals, marker_color="#6366f1"),
-                ])
-                fig.update_layout(
-                    barmode="group", title="Provider NDCG: Original vs Reranked",
-                    yaxis=dict(range=[0, 1], title="NDCG Score"),
-                    height=400, width=600,
+                fig = go.Figure(
+                    data=[
+                        go.Bar(name="Original NDCG", x=provs, y=orig_vals, marker_color="#94a3b8"),
+                        go.Bar(
+                            name="Reranked NDCG", x=provs, y=reranked_vals, marker_color="#6366f1"
+                        ),
+                    ]
                 )
-                charts_html["validation_provider"] = fig.to_html(full_html=False, include_plotlyjs=False)
+                fig.update_layout(
+                    barmode="group",
+                    title="Provider NDCG: Original vs Reranked",
+                    yaxis=dict(range=[0, 1], title="NDCG Score"),
+                    height=400,
+                    width=600,
+                )
+                charts_html["validation_provider"] = fig.to_html(
+                    full_html=False, include_plotlyjs=False
+                )
 
         # --- Evolution chart ---
         if data.get("evolution_data"):
@@ -588,20 +690,34 @@ class ReportGenerator:
                 means = [h.get("mean", 0) for h in ed["fitness_history"]]
                 maxes = [h.get("max", 0) for h in ed["fitness_history"]]
                 fig = go.Figure()
-                fig.add_trace(go.Scatter(
-                    x=gens, y=means, mode="lines+markers", name="Mean Fitness",
-                    line=dict(color="#6366f1"),
-                ))
-                fig.add_trace(go.Scatter(
-                    x=gens, y=maxes, mode="lines+markers", name="Max Fitness",
-                    line=dict(color="#ef4444"),
-                ))
+                fig.add_trace(
+                    go.Scatter(
+                        x=gens,
+                        y=means,
+                        mode="lines+markers",
+                        name="Mean Fitness",
+                        line=dict(color="#6366f1"),
+                    )
+                )
+                fig.add_trace(
+                    go.Scatter(
+                        x=gens,
+                        y=maxes,
+                        mode="lines+markers",
+                        name="Max Fitness",
+                        line=dict(color="#ef4444"),
+                    )
+                )
                 fig.update_layout(
                     title="Fitness History Across Generations",
-                    xaxis_title="Generation", yaxis_title="Fitness",
-                    height=400, width=700,
+                    xaxis_title="Generation",
+                    yaxis_title="Fitness",
+                    height=400,
+                    width=700,
                 )
-                charts_html["evolution_fitness"] = fig.to_html(full_html=False, include_plotlyjs=False)
+                charts_html["evolution_fitness"] = fig.to_html(
+                    full_html=False, include_plotlyjs=False
+                )
 
         html = self._build_html_report(data, charts_html)
 
@@ -664,26 +780,28 @@ class ReportGenerator:
             <h1 class="text-2xl font-bold text-stone-900">SearchProbe Benchmark Report</h1>
             <div class="flex flex-wrap gap-x-6 gap-y-1 mt-2 text-sm text-stone-500">
                 <span>Run ID: <code class="bg-stone-100 px-1.5 py-0.5 rounded text-stone-700">{run_id[:8]}</code></span>
-                <span>Generated: {data['generated_at']}</span>
+                <span>Generated: {data["generated_at"]}</span>
             </div>
         </div>
 """
 
         # Overall Statistics
         stats_grid = f"""<div class="grid grid-cols-2 md:grid-cols-4 gap-4">
-            {_stat_box(str(stats.get('count', 0)), 'Total Evaluated')}
-            {_stat_box(f"{stats.get('mean', 0):.3f}", 'Mean Score')}
-            {_stat_box(f"{stats.get('median', 0):.3f}", 'Median Score')}
-            {_stat_box(f"${run_stats.get('cost_total', 0):.4f}", 'Total Cost')}
+            {_stat_box(str(stats.get("count", 0)), "Total Evaluated")}
+            {_stat_box(f"{stats.get('mean', 0):.3f}", "Mean Score")}
+            {_stat_box(f"{stats.get('median', 0):.3f}", "Median Score")}
+            {_stat_box(f"${run_stats.get('cost_total', 0):.4f}", "Total Cost")}
         </div>"""
-        html += _section("Overall Statistics", "Summary metrics across all providers and categories", stats_grid)
+        html += _section(
+            "Overall Statistics", "Summary metrics across all providers and categories", stats_grid
+        )
 
         # Radar chart
         if charts.get("radar"):
             html += _section(
                 "Provider Performance by Category",
                 "Radar comparison of provider scores across adversarial categories",
-                f'<div>{charts["radar"]}</div>',
+                f"<div>{charts['radar']}</div>",
             )
 
         # Heatmap
@@ -691,7 +809,7 @@ class ReportGenerator:
             html += _section(
                 "Score Heatmap",
                 "Provider scores by category with color intensity",
-                f'<div>{charts["heatmap"]}</div>',
+                f"<div>{charts['heatmap']}</div>",
             )
 
         # Bar chart
@@ -699,37 +817,37 @@ class ReportGenerator:
             html += _section(
                 "Overall Scores by Provider",
                 "Mean scores with 95% confidence intervals",
-                f'<div>{charts["bar"]}</div>',
+                f"<div>{charts['bar']}</div>",
             )
 
         # --- Geometry section ---
         if data.get("geometry_data"):
             gd = data["geometry_data"]
             geo_stats = f"""<div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
-                {_stat_box(str(gd['num_models']), 'Models Analyzed')}
-                {_stat_box(f"{gd['mean_vulnerability']:.3f}", 'Mean Vulnerability')}
-                {_stat_box(gd['most_vulnerable_category'].replace('_', ' ').title(), 'Most Vulnerable Category')}
-                {_stat_box(str(gd['num_categories']), 'Categories Analyzed')}
+                {_stat_box(str(gd["num_models"]), "Models Analyzed")}
+                {_stat_box(f"{gd['mean_vulnerability']:.3f}", "Mean Vulnerability")}
+                {_stat_box(gd["most_vulnerable_category"].replace("_", " ").title(), "Most Vulnerable Category")}
+                {_stat_box(str(gd["num_categories"]), "Categories Analyzed")}
             </div>"""
             chart_html = charts.get("geometry_heatmap", "")
             html += _section(
                 "Embedding Geometry Analysis",
                 "Vulnerability scores measuring how adversarial queries collapse embedding space",
-                geo_stats + f'<div>{chart_html}</div>',
+                geo_stats + f"<div>{chart_html}</div>",
             )
 
         # --- Perturbation section ---
         if data.get("perturbation_data"):
             pd = data["perturbation_data"]
             perturb_stats = f"""<div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
-                {_stat_box(str(pd['total_perturbations']), 'Total Perturbations')}
-                {_stat_box(f"{pd['mean_jaccard']:.3f}", 'Mean Jaccard')}
-                {_stat_box(f"{pd['mean_rbo']:.3f}", 'Mean RBO')}
-                {_stat_box(pd['least_stable_operator'].replace('_', ' ').title(), 'Least Stable Operator')}
+                {_stat_box(str(pd["total_perturbations"]), "Total Perturbations")}
+                {_stat_box(f"{pd['mean_jaccard']:.3f}", "Mean Jaccard")}
+                {_stat_box(f"{pd['mean_rbo']:.3f}", "Mean RBO")}
+                {_stat_box(pd["least_stable_operator"].replace("_", " ").title(), "Least Stable Operator")}
             </div>"""
             perturb_charts = ""
             if charts.get("perturbation_operator"):
-                perturb_charts += f'<div>{charts["perturbation_operator"]}</div>'
+                perturb_charts += f"<div>{charts['perturbation_operator']}</div>"
             if charts.get("perturbation_category"):
                 perturb_charts += f'<div class="mt-4">{charts["perturbation_category"]}</div>'
             html += _section(
@@ -742,14 +860,14 @@ class ReportGenerator:
         if data.get("validation_data"):
             vd = data["validation_data"]
             val_stats = f"""<div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
-                {_stat_box(f"{vd['mean_ndcg_improvement']:.3f}", 'Mean NDCG Improvement')}
-                {_stat_box(f"{vd['max_ndcg_improvement']:.3f}", 'Max NDCG Improvement')}
+                {_stat_box(f"{vd['mean_ndcg_improvement']:.3f}", "Mean NDCG Improvement")}
+                {_stat_box(f"{vd['max_ndcg_improvement']:.3f}", "Max NDCG Improvement")}
                 {_stat_box(f"{vd['mean_kendall_tau']:.3f}", "Mean Kendall's Tau")}
-                {_stat_box(str(vd['queries_validated']), 'Queries Validated')}
+                {_stat_box(str(vd["queries_validated"]), "Queries Validated")}
             </div>"""
             val_charts = ""
             if charts.get("validation_ndcg"):
-                val_charts += f'<div>{charts["validation_ndcg"]}</div>'
+                val_charts += f"<div>{charts['validation_ndcg']}</div>"
             if charts.get("validation_provider"):
                 val_charts += f'<div class="mt-4">{charts["validation_provider"]}</div>'
             html += _section(
@@ -762,14 +880,14 @@ class ReportGenerator:
         if data.get("evolution_data"):
             ed = data["evolution_data"]
             evo_stats = f"""<div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
-                {_stat_box(str(ed['generations']), 'Generations')}
-                {_stat_box(str(ed['total_evaluations']), 'Total Evaluations')}
-                {_stat_box(f"{ed['best_fitness']:.3f}", 'Best Fitness')}
-                {_stat_box(ed['fitness_mode'].replace('_', ' ').title(), 'Fitness Mode')}
+                {_stat_box(str(ed["generations"]), "Generations")}
+                {_stat_box(str(ed["total_evaluations"]), "Total Evaluations")}
+                {_stat_box(f"{ed['best_fitness']:.3f}", "Best Fitness")}
+                {_stat_box(ed["fitness_mode"].replace("_", " ").title(), "Fitness Mode")}
             </div>"""
             evo_charts = ""
             if charts.get("evolution_fitness"):
-                evo_charts += f'<div>{charts["evolution_fitness"]}</div>'
+                evo_charts += f"<div>{charts['evolution_fitness']}</div>"
 
             # Top queries table
             if ed["best_individuals"]:
@@ -814,7 +932,7 @@ class ReportGenerator:
             html += _section(
                 "Top Failure Modes",
                 "Most common failure patterns across all evaluations",
-                f'<div>{charts["failures"]}</div>',
+                f"<div>{charts['failures']}</div>",
             )
 
         # Cost breakdown
@@ -822,7 +940,7 @@ class ReportGenerator:
             html += _section(
                 "Cost Breakdown",
                 "API cost distribution by provider",
-                f'<div>{charts["cost"]}</div>',
+                f"<div>{charts['cost']}</div>",
             )
 
         # Provider scores table
@@ -868,7 +986,7 @@ class ReportGenerator:
                     <div class="bg-amber-50 border-l-4 border-amber-400 rounded-r-lg p-3 mb-2">
                         <div class="font-medium text-stone-800 text-sm">{query}</div>
                         <div class="text-xs text-stone-500 mt-1">
-                            {ex['provider']} &middot; Score: {ex['score']:.2f} &middot; {modes}
+                            {ex["provider"]} &middot; Score: {ex["score"]:.2f} &middot; {modes}
                         </div>
                     </div>"""
             html += _section(
@@ -893,8 +1011,5 @@ class ReportGenerator:
 def _html_escape(text: str) -> str:
     """Escape HTML special characters."""
     return (
-        text.replace("&", "&amp;")
-        .replace("<", "&lt;")
-        .replace(">", "&gt;")
-        .replace('"', "&quot;")
+        text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;")
     )

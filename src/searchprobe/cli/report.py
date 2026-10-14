@@ -1,8 +1,5 @@
 """Generate benchmark reports command."""
 
-from pathlib import Path
-from typing import Optional
-
 import typer
 from rich.console import Console
 
@@ -87,6 +84,7 @@ def report(
         # Open in browser if requested
         if open_browser and "html" in output_files:
             import webbrowser
+
             html_path = output_files["html"]
             url = f"file://{html_path.absolute()}"
             console.print(f"\n[blue]Opening in browser: {url}[/blue]")

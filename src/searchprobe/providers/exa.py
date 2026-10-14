@@ -1,7 +1,7 @@
 """Exa search provider implementation."""
 
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any, ClassVar
 from urllib.parse import urlparse
 
@@ -69,9 +69,7 @@ class ExaProvider(SearchProvider):
             import asyncio
 
             loop = asyncio.get_event_loop()
-            response = await loop.run_in_executor(
-                None, lambda: self.client.search(**search_kwargs)
-            )
+            response = await loop.run_in_executor(None, lambda: self.client.search(**search_kwargs))
 
             # Calculate timing
             latency_ms = (time.perf_counter() - start_time) * 1000
@@ -132,7 +130,7 @@ class ExaProvider(SearchProvider):
                 results=results,
                 latency_ms=latency_ms,
                 cost_usd=total_cost,
-                timestamp=datetime.now(timezone.utc),
+                timestamp=datetime.now(UTC),
                 metadata={
                     "search_type": mode,
                     "results_requested": request.num_results,
@@ -141,7 +139,7 @@ class ExaProvider(SearchProvider):
             )
 
         except Exception as e:
-            from searchprobe.core.exceptions import ProviderError, RateLimitError
+            from searchprobe.core.exceptions import RateLimitError
 
             latency_ms = (time.perf_counter() - start_time) * 1000
             error_msg = str(e)
@@ -157,6 +155,6 @@ class ExaProvider(SearchProvider):
                 results=[],
                 latency_ms=latency_ms,
                 cost_usd=0.0,
-                timestamp=datetime.now(timezone.utc),
+                timestamp=datetime.now(UTC),
                 error=error_msg,
             )

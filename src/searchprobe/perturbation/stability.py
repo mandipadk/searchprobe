@@ -3,10 +3,6 @@
 Implements Jaccard similarity and Rank-Biased Overlap (Webber et al. 2010).
 """
 
-import math
-
-import numpy as np
-
 from searchprobe.perturbation.models import PerturbationAnalysis, SensitivityMap
 from searchprobe.perturbation.operators import PerturbationType
 
@@ -75,7 +71,7 @@ def rank_biased_overlap(
         rbo += (p ** (d - 1)) * agreement
 
     # Normalize
-    rbo *= (1 - p)
+    rbo *= 1 - p
 
     return min(1.0, rbo)
 
@@ -113,9 +109,7 @@ def compute_sensitivity_map(
                 # Sensitivity = how much results changed (1 - jaccard)
                 sensitivity = 1.0 - analysis.jaccard_similarity
                 if deleted_word in word_scores:
-                    word_scores[deleted_word] = max(
-                        word_scores[deleted_word], sensitivity
-                    )
+                    word_scores[deleted_word] = max(word_scores[deleted_word], sensitivity)
 
     # Normalize to [0, 1]
     max_score = max(word_scores.values()) if word_scores else 1.0

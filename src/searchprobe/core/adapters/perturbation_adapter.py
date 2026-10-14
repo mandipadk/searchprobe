@@ -51,6 +51,7 @@ class PerturbationAdapter:
         else:
             # Fallback: use taxonomy example queries
             from searchprobe.queries.taxonomy import CATEGORY_METADATA, AdversarialCategory
+
             for cat in AdversarialCategory:
                 if categories and cat.value not in categories:
                     continue
@@ -63,21 +64,27 @@ class PerturbationAdapter:
         # Build signals
         signals: list[Signal] = []
         for cat, stability in report.stability_by_category.items():
-            signals.append(Signal(
-                type=SignalType.STABILITY_MEASURED,
-                source=self.name,
-                category=cat,
-                data={
-                    "mean_jaccard": stability,
-                    "provider": report.provider,
-                },
-            ))
+            signals.append(
+                Signal(
+                    type=SignalType.STABILITY_MEASURED,
+                    source=self.name,
+                    category=cat,
+                    data={
+                        "mean_jaccard": stability,
+                        "provider": report.provider,
+                    },
+                )
+            )
 
         # Find least stable operator
-        least_stable_op = min(
-            report.stability_by_operator.items(),
-            key=lambda x: x[1],
-        )[0] if report.stability_by_operator else None
+        least_stable_op = (
+            min(
+                report.stability_by_operator.items(),
+                key=lambda x: x[1],
+            )[0]
+            if report.stability_by_operator
+            else None
+        )
 
         details = [
             {

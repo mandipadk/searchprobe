@@ -40,16 +40,16 @@ def main(
 
 
 # Import and register subcommands
-from searchprobe.cli import run as run_module  # noqa: E402
-from searchprobe.cli import generate as generate_module  # noqa: E402
-from searchprobe.cli import evaluate as evaluate_module  # noqa: E402
-from searchprobe.cli import report as report_module  # noqa: E402
 from searchprobe.cli import dashboard as dashboard_module  # noqa: E402
-from searchprobe.cli import geometry as geometry_module  # noqa: E402
-from searchprobe.cli import validate as validate_module  # noqa: E402
-from searchprobe.cli import perturb as perturb_module  # noqa: E402
+from searchprobe.cli import evaluate as evaluate_module  # noqa: E402
 from searchprobe.cli import evolve as evolve_module  # noqa: E402
+from searchprobe.cli import generate as generate_module  # noqa: E402
+from searchprobe.cli import geometry as geometry_module  # noqa: E402
+from searchprobe.cli import perturb as perturb_module  # noqa: E402
+from searchprobe.cli import report as report_module  # noqa: E402
+from searchprobe.cli import run as run_module  # noqa: E402
 from searchprobe.cli import session as session_module  # noqa: E402
+from searchprobe.cli import validate as validate_module  # noqa: E402
 
 app.add_typer(run_module.app, name="run")
 app.add_typer(generate_module.app, name="generate")

@@ -1,11 +1,18 @@
 """Configuration management for SearchProbe."""
 
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
 from searchprobe.config.settings import Settings, get_settings
+
+if TYPE_CHECKING:
+    import anthropic
 
 __all__ = ["Settings", "get_settings", "get_anthropic_client"]
 
 
-def get_anthropic_client(settings: Settings | None = None) -> "anthropic.Anthropic":
+def get_anthropic_client(settings: Settings | None = None) -> anthropic.Anthropic:
     """Create an Anthropic client using either direct API key or Vertex AI.
 
     Args:

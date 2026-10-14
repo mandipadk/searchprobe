@@ -1,11 +1,10 @@
 """CLI command for perturbation analysis."""
 
 import asyncio
-from typing import Optional
 
 import typer
 from rich.console import Console
-from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn
+from rich.progress import BarColumn, Progress, SpinnerColumn, TaskProgressColumn, TextColumn
 from rich.table import Table
 
 from searchprobe.config import get_settings
@@ -35,7 +34,7 @@ def perturb(
         "-v",
         help="Maximum variants per operator per query",
     ),
-    max_queries: Optional[int] = typer.Option(
+    max_queries: int | None = typer.Option(
         None,
         "--max-queries",
         "-n",
@@ -47,7 +46,7 @@ def perturb(
         "-p",
         help="Provider to test perturbation stability",
     ),
-    search_mode: Optional[str] = typer.Option(
+    search_mode: str | None = typer.Option(
         None,
         "--mode",
         help="Search mode (e.g., 'neural', 'auto')",
@@ -81,7 +80,9 @@ def perturb(
     for r in search_results:
         if r["query_id"] not in seen_queries:
             seen_queries.add(r["query_id"])
-            queries.append({"text": r["query_text"], "category": r["category"], "query_id": r["query_id"]})
+            queries.append(
+                {"text": r["query_text"], "category": r["category"], "query_id": r["query_id"]}
+            )
 
     if not queries:
         console.print("[yellow]No queries found for perturbation.[/yellow]")
@@ -137,25 +138,25 @@ def perturb(
                 completed=index + 1,
             )
 
-        report = asyncio.run(
-            engine.analyze_queries(queries, search_mode, on_progress)
-        )
+        report = asyncio.run(engine.analyze_queries(queries, search_mode, on_progress))
 
     # Build lookup: original_query_text -> query_id
     query_id_map: dict[str, str] = {q["text"]: q["query_id"] for q in queries}
 
     # Save results
     for analysis in report.analyses:
-        db.add_perturbation_result({
-            "run_id": actual_run_id,
-            "query_id": query_id_map.get(analysis.original_query),
-            "provider": analysis.provider,
-            "operator": analysis.perturbation_type,
-            "original_query": analysis.original_query,
-            "perturbed_query": analysis.perturbed_query,
-            "jaccard_similarity": analysis.jaccard_similarity,
-            "rbo_score": analysis.rbo_score,
-        })
+        db.add_perturbation_result(
+            {
+                "run_id": actual_run_id,
+                "query_id": query_id_map.get(analysis.original_query),
+                "provider": analysis.provider,
+                "operator": analysis.perturbation_type,
+                "original_query": analysis.original_query,
+                "perturbed_query": analysis.perturbed_query,
+                "jaccard_similarity": analysis.jaccard_similarity,
+                "rbo_score": analysis.rbo_score,
+            }
+        )
 
     # Display summary
     console.print(f"\n[green]Completed {len(report.analyses)} perturbation analyses[/green]")
@@ -201,4 +202,4 @@ def _display_summary(report: object) -> None:
         for sm in report.sensitivity_maps[:5]:
             top_words = sm.get_most_sensitive_words(3)
             words_str = ", ".join(f"'{w}' ({s:.2f})" for w, s in top_words)
-            console.print(f"  \"{sm.query[:50]}...\" — Load-bearing: {words_str}")
+            console.print(f'  "{sm.query[:50]}..." — Load-bearing: {words_str}')

@@ -27,7 +27,6 @@ from searchprobe.geometry.vulnerability import (
 )
 from searchprobe.queries.taxonomy import AdversarialCategory
 
-
 DEFAULT_MODELS = [
     "all-MiniLM-L6-v2",
     "all-mpnet-base-v2",
@@ -145,13 +144,15 @@ class EmbeddingGeometryAnalyzer:
         for pair in adversarial_pairs:
             result = self.compute_pair_similarity(pair, model_name)
             profile.adversarial_similarities.append(result.cosine_similarity)
-            profile.pair_details.append({
-                "query_a": pair.query_a,
-                "query_b": pair.query_b,
-                "similarity": result.cosine_similarity,
-                "angular_distance": result.angular_distance,
-                "relationship": pair.expected_relationship,
-            })
+            profile.pair_details.append(
+                {
+                    "query_a": pair.query_a,
+                    "query_b": pair.query_b,
+                    "similarity": result.cosine_similarity,
+                    "angular_distance": result.angular_distance,
+                    "relationship": pair.expected_relationship,
+                }
+            )
             all_adversarial_texts.extend([pair.query_a, pair.query_b])
 
         # Compute baseline similarities

@@ -53,9 +53,7 @@ class FitnessEvaluator:
         else:
             return self._evaluate_embedding_sim(individual)
 
-    async def evaluate_population(
-        self, individuals: list[Individual]
-    ) -> list[Individual]:
+    async def evaluate_population(self, individuals: list[Individual]) -> list[Individual]:
         """Evaluate fitness for an entire population.
 
         Args:
@@ -174,12 +172,20 @@ class FitnessEvaluator:
             score += 0.1
 
         # Feature 5: Has temporal markers (0-0.1)
-        temporal_words = {"before", "after", "since", "until", "between", "during", "recent", "latest"}
+        temporal_words = {
+            "before",
+            "after",
+            "since",
+            "until",
+            "between",
+            "during",
+            "recent",
+            "latest",
+        }
         if any(w in temporal_words for w in words):
             score += 0.1
 
         # Feature 6: Boolean operators (0-0.1)
-        boolean_ops = {"and", "or", "not"}
         n_boolean = sum(1 for w in words if w.upper() in {"AND", "OR", "NOT"})
         if n_boolean >= 2:
             score += 0.1

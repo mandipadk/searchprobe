@@ -170,9 +170,9 @@ Respond with valid JSON in this exact format:
         prompt += f"""
 
 ## Reference Information (for your calibration)
-Expected relevant results should match: {ground_truth.get('should_match', 'N/A')}
-Expected irrelevant results would match: {ground_truth.get('should_not_match', 'N/A')}
-Expected entity disambiguation: {ground_truth.get('expected_entity', 'N/A')}"""
+Expected relevant results should match: {ground_truth.get("should_match", "N/A")}
+Expected irrelevant results would match: {ground_truth.get("should_not_match", "N/A")}
+Expected entity disambiguation: {ground_truth.get("expected_entity", "N/A")}"""
 
     return prompt
 
@@ -192,7 +192,7 @@ def build_batch_prompt(
 
 """
     for i, eval_item in enumerate(evaluations, 1):
-        prompt += f"\n{'='*50}\n"
+        prompt += f"\n{'=' * 50}\n"
         prompt += f"## Query Set {i}\n"
         prompt += build_evaluation_prompt(
             query=eval_item["query"],

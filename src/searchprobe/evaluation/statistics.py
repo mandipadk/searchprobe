@@ -49,9 +49,7 @@ def calculate_confidence_interval(
         ConfidenceInterval with mean, lower, upper bounds
     """
     if not scores:
-        return ConfidenceInterval(
-            mean=0.0, lower=0.0, upper=0.0, confidence=confidence, n=0
-        )
+        return ConfidenceInterval(mean=0.0, lower=0.0, upper=0.0, confidence=confidence, n=0)
 
     n = len(scores)
     mean = np.mean(scores)
@@ -134,9 +132,7 @@ def mann_whitney_test(
         return 0.0, 1.0
 
     try:
-        statistic, p_value = stats.mannwhitneyu(
-            scores_a, scores_b, alternative="two-sided"
-        )
+        statistic, p_value = stats.mannwhitneyu(scores_a, scores_b, alternative="two-sided")
         return float(statistic), float(p_value)
     except Exception:
         return 0.0, 1.0
@@ -165,9 +161,7 @@ def cohens_d(scores_a: list[float], scores_b: list[float]) -> float:
     var_a = np.var(scores_a, ddof=1) if n_a > 1 else 0
     var_b = np.var(scores_b, ddof=1) if n_b > 1 else 0
 
-    pooled_std = math.sqrt(
-        ((n_a - 1) * var_a + (n_b - 1) * var_b) / (n_a + n_b - 2)
-    )
+    pooled_std = math.sqrt(((n_a - 1) * var_a + (n_b - 1) * var_b) / (n_a + n_b - 2))
 
     if pooled_std == 0:
         return 0.0
@@ -208,18 +202,15 @@ def bootstrap_confidence_interval(
         )
 
     rng = np.random.default_rng(42)
-    bootstrap_stats = np.array([
-        float(stat_func(rng.choice(arr, size=n, replace=True)))
-        for _ in range(n_bootstrap)
-    ])
+    bootstrap_stats = np.array(
+        [float(stat_func(rng.choice(arr, size=n, replace=True))) for _ in range(n_bootstrap)]
+    )
 
     alpha = 1 - confidence
     lower = float(np.percentile(bootstrap_stats, 100 * alpha / 2))
     upper = float(np.percentile(bootstrap_stats, 100 * (1 - alpha / 2)))
 
-    return ConfidenceInterval(
-        mean=observed, lower=lower, upper=upper, confidence=confidence, n=n
-    )
+    return ConfidenceInterval(mean=observed, lower=lower, upper=upper, confidence=confidence, n=n)
 
 
 def benjamini_hochberg(p_values: list[float], alpha: float = 0.05) -> list[bool]:
@@ -244,7 +235,7 @@ def benjamini_hochberg(p_values: list[float], alpha: float = 0.05) -> list[bool]
     significant = [False] * m
     # Find the largest k such that p_(k) <= k/m * alpha
     max_k = -1
-    for k, (orig_idx, p_val) in enumerate(indexed, 1):
+    for k, (_orig_idx, p_val) in enumerate(indexed, 1):
         threshold = (k / m) * alpha
         if p_val <= threshold:
             max_k = k
@@ -324,7 +315,9 @@ def aggregate_by_category(
 
     for eval_item in evaluations:
         category = eval_item.get("category", "unknown")
-        provider_key = f"{eval_item.get('provider', 'unknown')}:{eval_item.get('search_mode', 'default')}"
+        provider_key = (
+            f"{eval_item.get('provider', 'unknown')}:{eval_item.get('search_mode', 'default')}"
+        )
         score = eval_item.get("weighted_score", 0.0)
 
         if category not in grouped:
@@ -359,17 +352,16 @@ def aggregate_by_provider(
     grouped: dict[str, list[float]] = {}
 
     for eval_item in evaluations:
-        provider_key = f"{eval_item.get('provider', 'unknown')}:{eval_item.get('search_mode', 'default')}"
+        provider_key = (
+            f"{eval_item.get('provider', 'unknown')}:{eval_item.get('search_mode', 'default')}"
+        )
         score = eval_item.get("weighted_score", 0.0)
 
         if provider_key not in grouped:
             grouped[provider_key] = []
         grouped[provider_key].append(score)
 
-    return {
-        provider: calculate_confidence_interval(scores)
-        for provider, scores in grouped.items()
-    }
+    return {provider: calculate_confidence_interval(scores) for provider, scores in grouped.items()}
 
 
 def failure_mode_frequency(

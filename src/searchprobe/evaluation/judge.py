@@ -1,17 +1,16 @@
 """LLM-as-judge for evaluating search results."""
 
-import json
-import re
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from typing import Any, Callable
+from datetime import UTC, datetime
+from typing import Any
 
 from searchprobe.config import Settings, get_anthropic_client, get_settings
 from searchprobe.core.exceptions import ConfigurationError, EvaluationError
 from searchprobe.evaluation.dimensions import (
     EvaluationDimension,
-    get_active_dimensions,
     calculate_weighted_score,
+    get_active_dimensions,
 )
 from searchprobe.evaluation.prompts import JUDGE_SYSTEM_PROMPT, build_evaluation_prompt
 from searchprobe.providers.models import SearchResponse
@@ -39,7 +38,7 @@ class EvaluationResult:
     failure_modes: list[str]
     best_result_index: int | None
     overall_assessment: str
-    evaluated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    evaluated_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     raw_response: str | None = None
     error: str | None = None
 
@@ -181,9 +180,7 @@ class SearchJudge:
                     pass
 
             # Calculate weighted score
-            scores_dict = {
-                EvaluationDimension(k): v.score for k, v in dimension_scores.items()
-            }
+            scores_dict = {EvaluationDimension(k): v.score for k, v in dimension_scores.items()}
             weighted_score = calculate_weighted_score(scores_dict, category)
 
             return EvaluationResult(
@@ -200,9 +197,7 @@ class SearchJudge:
             )
 
         except Exception as e:
-            error = EvaluationError(
-                f"Evaluation failed for query {query_id}: {e}"
-            )
+            error = EvaluationError(f"Evaluation failed for query {query_id}: {e}")
             error.__cause__ = e
             return EvaluationResult(
                 query_id=query_id,

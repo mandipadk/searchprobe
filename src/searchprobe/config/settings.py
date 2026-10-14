@@ -75,10 +75,7 @@ class Settings(BaseSettings):
 
     def has_anthropic_configured(self) -> bool:
         """Check if Anthropic is available via direct API key or Vertex AI."""
-        return bool(
-            self.anthropic_api_key
-            or (self.use_vertex_ai and self.vertex_project_id)
-        )
+        return bool(self.anthropic_api_key or (self.use_vertex_ai and self.vertex_project_id))
 
 
 @lru_cache

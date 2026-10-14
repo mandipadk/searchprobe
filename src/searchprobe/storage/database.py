@@ -2,10 +2,11 @@
 
 import json
 import sqlite3
+from collections.abc import Generator
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Generator
+from typing import Any
 from uuid import uuid4
 
 from searchprobe.providers.models import SearchResponse
@@ -182,9 +183,13 @@ class Database:
             conn.execute("PRAGMA journal_mode=WAL")
             conn.executescript(self.SCHEMA)
             # Migrate: add run_id to geometry_results if missing
-            cols = [row[1] for row in conn.execute("PRAGMA table_info(geometry_results)").fetchall()]
+            cols = [
+                row[1] for row in conn.execute("PRAGMA table_info(geometry_results)").fetchall()
+            ]
             if "run_id" not in cols:
-                conn.execute("ALTER TABLE geometry_results ADD COLUMN run_id TEXT REFERENCES runs(id)")
+                conn.execute(
+                    "ALTER TABLE geometry_results ADD COLUMN run_id TEXT REFERENCES runs(id)"
+                )
             conn.commit()
 
     @contextmanager
@@ -299,7 +304,13 @@ class Database:
             conn.execute(
                 """INSERT INTO runs (id, name, query_set_id, started_at, config)
                    VALUES (?, ?, ?, ?, ?)""",
-                (run_id, name, query_set_id, datetime.now(timezone.utc).isoformat(), json.dumps(config or {})),
+                (
+                    run_id,
+                    name,
+                    query_set_id,
+                    datetime.now(UTC).isoformat(),
+                    json.dumps(config or {}),
+                ),
             )
             conn.commit()
         return run_id
@@ -313,16 +324,14 @@ class Database:
                 """UPDATE runs
                    SET completed_at = ?, cost_total = ?, cost_breakdown = ?
                    WHERE id = ?""",
-                (datetime.now(timezone.utc).isoformat(), cost_total, json.dumps(cost_breakdown), run_id),
+                (datetime.now(UTC).isoformat(), cost_total, json.dumps(cost_breakdown), run_id),
             )
             conn.commit()
 
     def get_latest_run_id(self) -> str | None:
         """Get the most recent run ID."""
         with self._get_connection() as conn:
-            row = conn.execute(
-                "SELECT id FROM runs ORDER BY started_at DESC LIMIT 1"
-            ).fetchone()
+            row = conn.execute("SELECT id FROM runs ORDER BY started_at DESC LIMIT 1").fetchone()
             return row["id"] if row else None
 
     # Search Results Operations
@@ -351,9 +360,7 @@ class Database:
             conn.commit()
         return result_id
 
-    def get_search_results(
-        self, run_id: str, provider: str | None = None
-    ) -> list[dict[str, Any]]:
+    def get_search_results(self, run_id: str, provider: str | None = None) -> list[dict[str, Any]]:
         """Get search results for a run."""
         query = "SELECT * FROM search_results WHERE run_id = ?"
         params: list[Any] = [run_id]
@@ -463,7 +470,7 @@ class Database:
                     evaluation.get("overall_assessment", ""),
                     json.dumps(evaluation.get("failure_modes", [])),
                     evaluation.get("judge_model"),
-                    evaluation.get("evaluated_at", datetime.now(timezone.utc).isoformat()),
+                    evaluation.get("evaluated_at", datetime.now(UTC).isoformat()),
                 ),
             )
             conn.commit()
@@ -787,8 +794,8 @@ class Database:
                 return 0
 
             # Build aggregation: (provider, category, dimension) -> list of scores
-            from collections import defaultdict
             import math
+            from collections import defaultdict
 
             buckets: dict[tuple[str, str, str], list[float]] = defaultdict(list)
             failure_counts: dict[tuple[str, str], tuple[int, int]] = defaultdict(lambda: (0, 0))
@@ -800,15 +807,15 @@ class Database:
                 failure_json = row["failure_mode"]
 
                 # Track overall weighted score under dimension="overall"
-                buckets[(provider, category, "overall")].append(
-                    row["weighted_score"] or 0.0
-                )
+                buckets[(provider, category, "overall")].append(row["weighted_score"] or 0.0)
 
                 # Track per-dimension scores
                 if scores_json:
                     dim_scores = json.loads(scores_json)
                     for dim_name, dim_data in dim_scores.items():
-                        score = dim_data.get("score", 0.0) if isinstance(dim_data, dict) else dim_data
+                        score = (
+                            dim_data.get("score", 0.0) if isinstance(dim_data, dict) else dim_data
+                        )
                         buckets[(provider, category, dim_name)].append(float(score))
 
                 # Track failures
@@ -836,8 +843,18 @@ class Database:
                        (run_id, provider, category, dimension, mean_score,
                         std_score, ci_lower, ci_upper, n_queries, failure_rate)
                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                    (run_id, provider, category, dimension, mean,
-                     std, ci_lower, ci_upper, n, failure_rate),
+                    (
+                        run_id,
+                        provider,
+                        category,
+                        dimension,
+                        mean,
+                        std,
+                        ci_lower,
+                        ci_upper,
+                        n,
+                        failure_rate,
+                    ),
                 )
                 count += 1
 

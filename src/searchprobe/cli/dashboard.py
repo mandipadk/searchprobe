@@ -48,8 +48,10 @@ def dashboard(
         "streamlit",
         "run",
         str(dashboard_path),
-        "--server.port", str(port),
-        "--server.address", host,
+        "--server.port",
+        str(port),
+        "--server.address",
+        host,
     ]
 
     if not browser:

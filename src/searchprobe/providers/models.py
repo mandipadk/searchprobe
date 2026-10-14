@@ -1,6 +1,6 @@
 """Normalized data models for search requests and responses across all providers."""
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from pydantic import BaseModel, Field, HttpUrl
@@ -93,11 +93,11 @@ class SearchResponse(BaseModel):
     results: list[SearchResult] = Field(default_factory=list, description="Search results")
     latency_ms: float = Field(default=0.0, ge=0, description="Request latency in milliseconds")
     cost_usd: float = Field(default=0.0, ge=0, description="Estimated cost in USD")
-    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc), description="When search was run")
-    error: str | None = Field(default=None, description="Error message if search failed")
-    metadata: dict[str, Any] = Field(
-        default_factory=dict, description="Provider-specific metadata"
+    timestamp: datetime = Field(
+        default_factory=lambda: datetime.now(UTC), description="When search was run"
     )
+    error: str | None = Field(default=None, description="Error message if search failed")
+    metadata: dict[str, Any] = Field(default_factory=dict, description="Provider-specific metadata")
 
     @property
     def success(self) -> bool:

@@ -1,12 +1,12 @@
 """Evaluation engine for search result quality assessment."""
 
 from searchprobe.evaluation.dimensions import (
-    EvaluationDimension,
     DIMENSION_WEIGHTS,
-    get_weights_for_category,
+    EvaluationDimension,
     calculate_weighted_score,
+    get_weights_for_category,
 )
-from searchprobe.evaluation.judge import SearchJudge, EvaluationResult
+from searchprobe.evaluation.judge import EvaluationResult, SearchJudge
 
 __all__ = [
     "EvaluationDimension",

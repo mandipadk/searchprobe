@@ -79,7 +79,13 @@ def get_builtin_seeds() -> list[Query]:
             tier="seed",
             ground_truth=GroundTruth(
                 strategy="must_not_contain",
-                must_not_contain_keywords=["Series A", "Series B", "raised", "funding round", "venture capital"],
+                must_not_contain_keywords=[
+                    "Series A",
+                    "Series B",
+                    "raised",
+                    "funding round",
+                    "venture capital",
+                ],
                 notes="Results should be bootstrapped or self-funded companies",
             ),
             adversarial_reason="Embeddings collapse 'never raised' to 'raised' due to semantic similarity",
@@ -103,7 +109,12 @@ def get_builtin_seeds() -> list[Query]:
             tier="seed",
             ground_truth=GroundTruth(
                 strategy="must_not_contain",
-                must_not_contain_keywords=["AI", "artificial intelligence", "machine learning", "neural network"],
+                must_not_contain_keywords=[
+                    "AI",
+                    "artificial intelligence",
+                    "machine learning",
+                    "neural network",
+                ],
             ),
             adversarial_reason="Will Bryk's canonical example - 'shirts without stripes' returns striped shirts",
         ),

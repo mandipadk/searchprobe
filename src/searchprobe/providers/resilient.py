@@ -30,6 +30,7 @@ logger = logging.getLogger(__name__)
 # Circuit Breaker
 # ---------------------------------------------------------------------------
 
+
 class CircuitState(Enum):
     CLOSED = "closed"  # Normal operation
     OPEN = "open"  # Rejecting requests (service is down)
@@ -70,9 +71,7 @@ class CircuitBreaker:
         self.last_failure_time = time.monotonic()
         if self.failure_count >= self.failure_threshold:
             self.state = CircuitState.OPEN
-            logger.warning(
-                "Circuit breaker opened after %d failures", self.failure_count
-            )
+            logger.warning("Circuit breaker opened after %d failures", self.failure_count)
 
     def can_execute(self) -> bool:
         """Check whether a request is allowed right now."""
@@ -92,6 +91,7 @@ class CircuitBreaker:
 # ---------------------------------------------------------------------------
 # Resilient Provider Wrapper
 # ---------------------------------------------------------------------------
+
 
 class ResilientProvider:
     """Wraps a SearchProvider with retries + circuit breaker.
@@ -203,7 +203,9 @@ class ResilientProvider:
             )
 
         # Unreachable but satisfies type checker
-        raise ProviderError("Unexpected control flow", provider=self.provider.NAME)  # pragma: no cover
+        raise ProviderError(
+            "Unexpected control flow", provider=self.provider.NAME
+        )  # pragma: no cover
 
     async def health_check(self) -> bool:
         """Proxy health check to the wrapped provider."""

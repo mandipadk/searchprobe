@@ -44,9 +44,7 @@ class CategoryMetadata(BaseModel):
     example_queries: list[str] = Field(
         default_factory=list, description="Example adversarial queries"
     )
-    ground_truth_strategy: str = Field(
-        ..., description="How to verify result correctness"
-    )
+    ground_truth_strategy: str = Field(..., description="How to verify result correctness")
     keyword_search_advantage: bool = Field(
         default=False, description="Whether keyword search typically outperforms here"
     )
@@ -346,11 +344,7 @@ def get_category_metadata(category: AdversarialCategory) -> CategoryMetadata:
 
 def get_categories_by_difficulty(difficulty: str) -> list[AdversarialCategory]:
     """Get categories filtered by difficulty level."""
-    return [
-        cat
-        for cat, meta in CATEGORY_METADATA.items()
-        if meta.difficulty == difficulty
-    ]
+    return [cat for cat, meta in CATEGORY_METADATA.items() if meta.difficulty == difficulty]
 
 
 def get_example_queries(category: AdversarialCategory | None = None) -> list[str]:

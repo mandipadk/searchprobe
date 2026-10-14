@@ -57,7 +57,7 @@ def word_delete(query: str, max_variants: int = 5) -> list[tuple[str, str]]:
 
     variants = []
     for i, word in enumerate(words):
-        new_words = words[:i] + words[i + 1:]
+        new_words = words[:i] + words[i + 1 :]
         perturbed = " ".join(new_words)
         variants.append((perturbed, f"deleted '{word}' at position {i}"))
         if len(variants) >= max_variants:
@@ -130,7 +130,7 @@ def negation_remove(query: str, **kwargs: object) -> list[tuple[str, str]]:
 
     for i, word in enumerate(words):
         if word.lower() in NEGATION_WORDS:
-            new_words = words[:i] + words[i + 1:]
+            new_words = words[:i] + words[i + 1 :]
             perturbed = " ".join(new_words)
             variants.append((perturbed, f"removed negation '{word}'"))
 

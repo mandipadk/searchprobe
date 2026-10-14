@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -42,7 +42,9 @@ class AsyncDatabase:
         await self.connect()
         return self
 
-    async def __aexit__(self, exc_type: type | None, exc_val: Exception | None, exc_tb: Any) -> None:
+    async def __aexit__(
+        self, exc_type: type | None, exc_val: Exception | None, exc_tb: Any
+    ) -> None:
         await self.close()
 
     @property
@@ -65,7 +67,13 @@ class AsyncDatabase:
         run_id = str(uuid4())
         await self.conn.execute(
             "INSERT INTO runs (id, name, query_set_id, started_at, config) VALUES (?, ?, ?, ?, ?)",
-            (run_id, name or f"run-{run_id}", query_set_id, datetime.now(timezone.utc).isoformat(), json.dumps(config or {})),
+            (
+                run_id,
+                name or f"run-{run_id}",
+                query_set_id,
+                datetime.now(UTC).isoformat(),
+                json.dumps(config or {}),
+            ),
         )
         await self.conn.commit()
         return run_id
@@ -79,15 +87,13 @@ class AsyncDatabase:
         """Mark a run as complete."""
         await self.conn.execute(
             "UPDATE runs SET completed_at = ?, cost_total = ?, cost_breakdown = ? WHERE id = ?",
-            (datetime.now(timezone.utc).isoformat(), total_cost, json.dumps(cost_breakdown), run_id),
+            (datetime.now(UTC).isoformat(), total_cost, json.dumps(cost_breakdown), run_id),
         )
         await self.conn.commit()
 
     async def get_latest_run_id(self) -> str | None:
         """Get the most recent run ID."""
-        cursor = await self.conn.execute(
-            "SELECT id FROM runs ORDER BY started_at DESC LIMIT 1"
-        )
+        cursor = await self.conn.execute("SELECT id FROM runs ORDER BY started_at DESC LIMIT 1")
         row = await cursor.fetchone()
         return row[0] if row else None
 
@@ -168,7 +174,7 @@ class AsyncDatabase:
                 evaluation.get("overall_assessment", ""),
                 json.dumps(evaluation.get("failure_modes", [])),
                 evaluation.get("judge_model"),
-                datetime.now(timezone.utc).isoformat(),
+                datetime.now(UTC).isoformat(),
             ),
         )
         await self.conn.commit()

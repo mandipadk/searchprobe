@@ -1,7 +1,7 @@
 """Provider comparison page."""
 
-import streamlit as st
 import pandas as pd
+import streamlit as st
 
 from searchprobe.evaluation.statistics import (
     aggregate_by_category,
@@ -22,10 +22,9 @@ def render(db: Database, run_id: str) -> None:
         return
 
     # Get unique providers
-    providers = list(set(
-        f"{e.get('provider', 'unknown')}:{e.get('search_mode', 'default')}"
-        for e in evaluations
-    ))
+    providers = list(
+        {f"{e.get('provider', 'unknown')}:{e.get('search_mode', 'default')}" for e in evaluations}
+    )
 
     if len(providers) < 2:
         st.info("Need at least 2 providers for comparison.")
@@ -42,12 +41,15 @@ def render(db: Database, run_id: str) -> None:
     st.markdown("---")
 
     # Prepare data
-    eval_data = [{
-        "category": e.get("category"),
-        "provider": e.get("provider"),
-        "search_mode": e.get("search_mode"),
-        "weighted_score": e.get("weighted_score", 0),
-    } for e in evaluations]
+    eval_data = [
+        {
+            "category": e.get("category"),
+            "provider": e.get("provider"),
+            "search_mode": e.get("search_mode"),
+            "weighted_score": e.get("weighted_score", 0),
+        }
+        for e in evaluations
+    ]
 
     # Head-to-head comparison
     st.subheader("Head-to-Head Comparison")
@@ -64,9 +66,7 @@ def render(db: Database, run_id: str) -> None:
     ]
 
     if scores_a and scores_b:
-        comparison = compare_providers(
-            provider_a, scores_a, provider_b, scores_b, paired=False
-        )
+        comparison = compare_providers(provider_a, scores_a, provider_b, scores_b, paired=False)
 
         col1, col2, col3 = st.columns(3)
 
@@ -80,9 +80,7 @@ def render(db: Database, run_id: str) -> None:
             diff = comparison.mean_diff
             sig = "✓ Significant" if comparison.significant else "Not significant"
             st.metric(
-                "Difference (A - B)",
-                f"{diff:+.3f}",
-                delta=f"p={comparison.p_value:.3f} ({sig})"
+                "Difference (A - B)", f"{diff:+.3f}", delta=f"p={comparison.p_value:.3f} ({sig})"
             )
 
     st.markdown("---")
@@ -124,7 +122,7 @@ def render(db: Database, run_id: str) -> None:
 
     comparison_data = []
     categories = set()
-    for category, provider_scores in by_category.items():
+    for category in by_category:
         categories.add(category)
 
     for category in sorted(categories):
@@ -140,7 +138,13 @@ def render(db: Database, run_id: str) -> None:
 
     if comparison_data:
         df = pd.DataFrame(comparison_data)
-        st.dataframe(df.style.format({
-            provider_a: "{:.3f}",
-            provider_b: "{:.3f}",
-        }, na_rep="-"), use_container_width=True)
+        st.dataframe(
+            df.style.format(
+                {
+                    provider_a: "{:.3f}",
+                    provider_b: "{:.3f}",
+                },
+                na_rep="-",
+            ),
+            use_container_width=True,
+        )

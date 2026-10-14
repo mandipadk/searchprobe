@@ -1,10 +1,10 @@
 """Category deep dive page."""
 
-import streamlit as st
 import pandas as pd
+import streamlit as st
 
-from searchprobe.queries.taxonomy import AdversarialCategory, CATEGORY_METADATA
-from searchprobe.evaluation.statistics import aggregate_by_category, calculate_confidence_interval
+from searchprobe.evaluation.statistics import calculate_confidence_interval
+from searchprobe.queries.taxonomy import CATEGORY_METADATA, AdversarialCategory
 from searchprobe.reporting.charts import create_bar_chart
 from searchprobe.storage import Database
 
@@ -20,13 +20,11 @@ def render(db: Database, run_id: str) -> None:
         return
 
     # Get unique categories
-    categories = sorted(set(e.get("category", "unknown") for e in evaluations))
+    categories = sorted({e.get("category", "unknown") for e in evaluations})
 
     # Category selection
     selected_category = st.selectbox(
-        "Select Category",
-        categories,
-        format_func=lambda x: x.replace("_", " ").title()
+        "Select Category", categories, format_func=lambda x: x.replace("_", " ").title()
     )
 
     st.markdown("---")
@@ -87,12 +85,14 @@ def render(db: Database, run_id: str) -> None:
 
     results_data = []
     for e in category_evals:
-        results_data.append({
-            "Provider": f"{e.get('provider', 'unknown')}:{e.get('search_mode', 'default')}",
-            "Query": e.get("query_text", "")[:80] + "...",
-            "Score": e.get("weighted_score", 0),
-            "Failures": ", ".join(e.get("failure_modes", [])[:3]),
-        })
+        results_data.append(
+            {
+                "Provider": f"{e.get('provider', 'unknown')}:{e.get('search_mode', 'default')}",
+                "Query": e.get("query_text", "")[:80] + "...",
+                "Score": e.get("weighted_score", 0),
+                "Failures": ", ".join(e.get("failure_modes", [])[:3]),
+            }
+        )
 
     if results_data:
         df = pd.DataFrame(results_data)
@@ -109,10 +109,12 @@ def render(db: Database, run_id: str) -> None:
             failure_counts[mode] = failure_counts.get(mode, 0) + 1
 
     if failure_counts:
-        failure_df = pd.DataFrame([
-            {"Failure Mode": k, "Count": v}
-            for k, v in sorted(failure_counts.items(), key=lambda x: x[1], reverse=True)
-        ])
+        failure_df = pd.DataFrame(
+            [
+                {"Failure Mode": k, "Count": v}
+                for k, v in sorted(failure_counts.items(), key=lambda x: x[1], reverse=True)
+            ]
+        )
         st.dataframe(failure_df, use_container_width=True)
     else:
         st.info("No failures recorded for this category.")

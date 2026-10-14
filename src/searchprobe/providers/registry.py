@@ -33,9 +33,7 @@ class ProviderRegistry:
     }
 
     @classmethod
-    def get_provider(
-        cls, name: str, settings: Settings | None = None
-    ) -> SearchProvider:
+    def get_provider(cls, name: str, settings: Settings | None = None) -> SearchProvider:
         """Get a configured provider instance by name.
 
         Args:
@@ -70,9 +68,7 @@ class ProviderRegistry:
         return provider_class(api_key=api_key)
 
     @classmethod
-    def get_all_configured(
-        cls, settings: Settings | None = None
-    ) -> dict[str, SearchProvider]:
+    def get_all_configured(cls, settings: Settings | None = None) -> dict[str, SearchProvider]:
         """Get all providers that have API keys configured.
 
         Args:
