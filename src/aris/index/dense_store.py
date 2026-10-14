@@ -13,7 +13,9 @@ logger = logging.getLogger(__name__)
 class DenseStore:
     """Vector store backed by ChromaDB for dense retrieval."""
 
-    def __init__(self, persist_dir: str = ".aris/index/dense", collection_name: str = "aris") -> None:
+    def __init__(
+        self, persist_dir: str = ".aris/index/dense", collection_name: str = "aris"
+    ) -> None:
         self._persist_dir = persist_dir
         self._collection_name = collection_name
         self._collection = None
@@ -23,6 +25,7 @@ class DenseStore:
         if self._collection is not None:
             return
         import chromadb
+
         Path(self._persist_dir).mkdir(parents=True, exist_ok=True)
         self._client = chromadb.PersistentClient(path=self._persist_dir)
         self._collection = self._client.get_or_create_collection(
@@ -43,12 +46,14 @@ class DenseStore:
             doc_id = doc.url or str(hash(text))
             ids.append(doc_id)
             doc_texts.append(text[:8000])  # ChromaDB limit
-            metadatas.append({
-                "url": doc.url,
-                "title": doc.title,
-                "source": doc.source,
-                "snippet": doc.snippet[:500] if doc.snippet else "",
-            })
+            metadatas.append(
+                {
+                    "url": doc.url,
+                    "title": doc.title,
+                    "source": doc.source,
+                    "snippet": doc.snippet[:500] if doc.snippet else "",
+                }
+            )
 
         if ids:
             self._collection.upsert(ids=ids, documents=doc_texts, metadatas=metadatas)

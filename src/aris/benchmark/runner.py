@@ -2,10 +2,8 @@
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import time
-from datetime import datetime, timezone
 from typing import Any
 
 from aris.benchmark.adapter import ArisSearchProvider
@@ -84,9 +82,7 @@ async def run_benchmark(
         category_results: dict[str, list[dict]] = {p: [] for p in provider_instances}
 
         for query in queries:
-            request = SearchRequest(
-                query=query, num_results=10, include_content=True
-            )
+            request = SearchRequest(query=query, num_results=10, include_content=True)
 
             for pname, provider in provider_instances.items():
                 try:
@@ -94,21 +90,25 @@ async def run_benchmark(
                     response = await provider.search(request)
                     latency = (time.perf_counter() - start) * 1000
 
-                    category_results[pname].append({
-                        "query": query,
-                        "num_results": len(response.results),
-                        "latency_ms": latency,
-                        "success": response.success,
-                        "error": response.error,
-                    })
+                    category_results[pname].append(
+                        {
+                            "query": query,
+                            "num_results": len(response.results),
+                            "latency_ms": latency,
+                            "success": response.success,
+                            "error": response.error,
+                        }
+                    )
                 except Exception as e:
-                    category_results[pname].append({
-                        "query": query,
-                        "num_results": 0,
-                        "latency_ms": 0,
-                        "success": False,
-                        "error": str(e),
-                    })
+                    category_results[pname].append(
+                        {
+                            "query": query,
+                            "num_results": 0,
+                            "latency_ms": 0,
+                            "success": False,
+                            "error": str(e),
+                        }
+                    )
 
         results[category] = category_results
 
@@ -121,6 +121,6 @@ async def run_benchmark(
 
 def _create_searchprobe_provider(name: str):
     """Create a SearchProbe provider by name."""
-    import os
     from searchprobe.providers.registry import create_provider
+
     return create_provider(name)

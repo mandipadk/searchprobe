@@ -23,9 +23,7 @@ class ResultEvaluator:
         self._min_constraint_satisfaction = min_constraint_satisfaction
         self._min_avg_score = min_avg_score
 
-    def evaluate(
-        self, query: StructuredQuery, results: list[ScoredDocument]
-    ) -> tuple[bool, str]:
+    def evaluate(self, query: StructuredQuery, results: list[ScoredDocument]) -> tuple[bool, str]:
         """Evaluate if results are good enough.
 
         Returns (is_sufficient, reason).

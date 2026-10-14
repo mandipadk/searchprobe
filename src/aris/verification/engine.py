@@ -6,7 +6,7 @@ import logging
 
 from aris.core.models import ScoredDocument
 from aris.que.models import ConstraintType, StructuredQuery
-from aris.verification.boolean import compute_constraint_score, verify_boolean_and
+from aris.verification.boolean import compute_constraint_score
 from aris.verification.domain import verify_domain
 from aris.verification.entity import verify_entity
 from aris.verification.models import VerificationResult

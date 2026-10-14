@@ -32,6 +32,7 @@ def set_dependencies(search_agent, sources, index_manager, config):
 @router.get("/health", response_model=HealthResponse)
 async def health():
     from aris import __version__
+
     return HealthResponse(
         status="ok",
         version=__version__,
@@ -76,12 +77,42 @@ async def search(request: SearchRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+def _is_public_http_url(url: str) -> bool:
+    """Reject non-HTTP schemes and hosts that resolve to private/loopback/link-local IPs."""
+    import ipaddress
+    import socket
+    from urllib.parse import urlsplit
+
+    parts = urlsplit(url)
+    if parts.scheme not in ("http", "https") or not parts.hostname:
+        return False
+    try:
+        infos = socket.getaddrinfo(parts.hostname, None)
+    except OSError:
+        return False
+    for info in infos:
+        ip = ipaddress.ip_address(info[4][0])
+        if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved:
+            return False
+    return True
+
+
 @router.post("/index")
 async def index_urls(request: IndexRequest):
+    import os
+
+    # Fetching arbitrary URLs on behalf of unauthenticated callers is an SSRF risk:
+    # the route is disabled unless explicitly enabled, and private hosts are refused.
+    if os.environ.get("ARIS_ENABLE_INDEX_API") != "1":
+        raise HTTPException(status_code=403, detail="Index API disabled (ARIS_ENABLE_INDEX_API=1)")
     if _index_manager is None:
         raise HTTPException(status_code=503, detail="Index manager not initialized")
+    blocked = [u for u in request.urls if not _is_public_http_url(u)]
+    if blocked:
+        raise HTTPException(status_code=400, detail=f"Refusing non-public URLs: {blocked}")
 
     from aris.sources.web import WebSource
+
     web = WebSource()
     try:
         documents = await web.fetch_urls(request.urls)

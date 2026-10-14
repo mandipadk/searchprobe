@@ -15,8 +15,8 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install ruff
-      - run: ruff check src/searchprobe/
-      - run: ruff format --check src/searchprobe/
+      - run: ruff check src/
+      - run: ruff format --check src/
 
   test-unit:
     runs-on: ubuntu-latest

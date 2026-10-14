@@ -43,7 +43,9 @@ class RetrievalEngine:
         self._config = config
         self._dense_retriever = DenseRetriever(dense_store) if dense_store else None
         self._sparse_retriever = SparseRetriever(sparse_store) if sparse_store else None
-        self._structured_retriever = StructuredRetriever(structured_store) if structured_store else None
+        self._structured_retriever = (
+            StructuredRetriever(structured_store) if structured_store else None
+        )
 
     async def retrieve(
         self,
@@ -76,7 +78,9 @@ class RetrievalEngine:
 
         # 3. Sparse BM25 retrieval
         if self._sparse_retriever:
-            sparse_results = await self._sparse_retriever.retrieve(search_query, num_results=max_candidates)
+            sparse_results = await self._sparse_retriever.retrieve(
+                search_query, num_results=max_candidates
+            )
             if sparse_results:
                 result_lists.append(sparse_results)
                 retriever_weights.append(weights.get("sparse", 0.25))
@@ -94,7 +98,9 @@ class RetrievalEngine:
         if not result_lists:
             return []
 
-        fused = reciprocal_rank_fusion(result_lists, weights=retriever_weights, max_results=max_candidates)
+        fused = reciprocal_rank_fusion(
+            result_lists, weights=retriever_weights, max_results=max_candidates
+        )
 
         # Apply negation filter
         if query.negations:
@@ -102,7 +108,8 @@ class RetrievalEngine:
 
         logger.info(
             "Retrieved %d candidates from %d retrieval paths",
-            len(fused), len(result_lists),
+            len(fused),
+            len(result_lists),
         )
         return fused
 
@@ -113,10 +120,7 @@ class RetrievalEngine:
         if not sources:
             return []
 
-        tasks = [
-            source.search(query, num_results=min(30, max_per_source))
-            for source in sources
-        ]
+        tasks = [source.search(query, num_results=min(30, max_per_source)) for source in sources]
         results = await asyncio.gather(*tasks, return_exceptions=True)
 
         all_docs: list[Document] = []

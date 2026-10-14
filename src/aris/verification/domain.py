@@ -2,9 +2,6 @@
 
 from __future__ import annotations
 
-import re
-from urllib.parse import urlparse
-
 from aris.core.models import Document
 from aris.que.models import Constraint
 from aris.verification.models import ConstraintStatus, VerificationResult

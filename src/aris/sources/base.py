@@ -99,7 +99,9 @@ class DataSource(ABC):
             self._circuit_breaker.record_failure()
             last = exc.last_attempt
             error_msg = str(last.exception()) if last.exception() else "Unknown error"
-            logger.warning("Source %s failed after %d retries: %s", self.NAME, self._max_retries, error_msg)
+            logger.warning(
+                "Source %s failed after %d retries: %s", self.NAME, self._max_retries, error_msg
+            )
             return []
         except Exception as exc:
             self._circuit_breaker.record_failure()

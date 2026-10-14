@@ -24,9 +24,11 @@ class DenseRetriever:
         results = self._store.query(query, n_results=num_results)
         scored = []
         for doc, score in results:
-            scored.append(ScoredDocument(
-                document=doc,
-                retrieval_score=score,
-                final_score=score,
-            ))
+            scored.append(
+                ScoredDocument(
+                    document=doc,
+                    retrieval_score=score,
+                    final_score=score,
+                )
+            )
         return scored

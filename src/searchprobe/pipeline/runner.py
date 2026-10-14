@@ -225,8 +225,8 @@ class BenchmarkRunner:
 
         for query in queries:
             for provider in self.config.providers:
-                # For Exa, run each mode as a separate task
-                if provider == "exa":
+                # For Exa (bare or wrapped, e.g. aris+exa), run each mode separately
+                if provider == "exa" or provider.endswith("+exa"):
                     for mode in self.config.exa_modes:
                         tasks.append(
                             QueryTask(

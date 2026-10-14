@@ -79,7 +79,8 @@ def run(
         provider_list = [p.strip().lower() for p in providers.split(",")]
         # Validate providers exist
         available = ProviderRegistry.list_available()
-        invalid = [p for p in provider_list if p not in available]
+        # "aris+<base>" wraps a base provider with Aris's verify-and-rerank layer.
+        invalid = [p for p in provider_list if p.removeprefix("aris+") not in available]
         if invalid:
             console.print(f"[red]Unknown providers: {invalid}[/red]")
             console.print(f"Available: {available}")

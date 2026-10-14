@@ -5,8 +5,6 @@ Checks that the correct entity is referenced (right Michael Jordan, etc.)
 
 from __future__ import annotations
 
-import re
-
 from aris.core.models import Document
 from aris.que.models import EntityReference
 from aris.verification.models import ConstraintStatus, VerificationResult

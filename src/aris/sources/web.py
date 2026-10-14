@@ -40,6 +40,7 @@ class WebSource(DataSource):
 
             try:
                 import trafilatura
+
                 content = trafilatura.extract(html) or ""
                 metadata = trafilatura.extract(html, output_format="json", include_links=False)
             except ImportError:
@@ -49,6 +50,7 @@ class WebSource(DataSource):
             title = ""
             if metadata:
                 import json
+
                 try:
                     meta_dict = json.loads(metadata) if isinstance(metadata, str) else metadata
                     title = meta_dict.get("title", "")
@@ -60,7 +62,7 @@ class WebSource(DataSource):
                 start = html.find("<title>")
                 end = html.find("</title>")
                 if start != -1 and end != -1:
-                    title = html[start + 7:end].strip()
+                    title = html[start + 7 : end].strip()
 
             return Document(
                 url=url,
@@ -81,6 +83,7 @@ class WebSource(DataSource):
     async def fetch_urls(self, urls: list[str]) -> list[Document]:
         """Fetch and extract content from multiple URLs."""
         import asyncio
+
         tasks = [self.fetch_url(url) for url in urls]
         results = await asyncio.gather(*tasks, return_exceptions=True)
         return [r for r in results if isinstance(r, Document)]

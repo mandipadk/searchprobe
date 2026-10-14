@@ -6,9 +6,7 @@ import logging
 
 from aris.core.config import ArisConfig
 from aris.core.models import Document
-from aris.index.content_extractor import extract_content
 from aris.index.dense_store import DenseStore
-from aris.index.document import IndexedDocument
 from aris.index.sparse_store import SparseStore
 from aris.index.structured_store import StructuredStore
 from aris.sources.web import WebSource

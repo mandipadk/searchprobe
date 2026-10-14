@@ -30,7 +30,9 @@ def verify_temporal(document: Document, constraint: Constraint) -> VerificationR
 
     # Try document's published_date first
     if document.published_date:
-        if _check_temporal(document.published_date, constraint.operator, target_date, constraint.value_upper):
+        if _check_temporal(
+            document.published_date, constraint.operator, target_date, constraint.value_upper
+        ):
             return VerificationResult(
                 constraint_type="temporal",
                 constraint_description=constraint.raw_text,

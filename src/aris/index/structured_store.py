@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 import logging
 import sqlite3
-from datetime import datetime
 from pathlib import Path
 
 from aris.core.models import Document
@@ -72,10 +71,10 @@ class StructuredStore:
                 (
                     doc.url,
                     doc.title,
-                    doc.snippet if hasattr(doc, 'snippet') else "",
+                    doc.snippet if hasattr(doc, "snippet") else "",
                     doc.content[:5000] if doc.content else "",
-                    doc.source if hasattr(doc, 'source') else "",
-                    doc.domain if hasattr(doc, 'domain') else "",
+                    doc.source if hasattr(doc, "source") else "",
+                    doc.domain if hasattr(doc, "domain") else "",
                     published_date,
                     word_count,
                     json.dumps(entities),

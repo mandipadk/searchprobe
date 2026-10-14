@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 
 class ComparisonOp(str, Enum):
     """Comparison operators for numeric/temporal constraints."""
+
     EQ = "eq"
     GT = "gt"
     GTE = "gte"
@@ -21,6 +22,7 @@ class ComparisonOp(str, Enum):
 
 class ConstraintType(str, Enum):
     """Types of constraints extracted from queries."""
+
     NEGATION = "negation"
     NUMERIC = "numeric"
     TEMPORAL = "temporal"
@@ -31,10 +33,13 @@ class ConstraintType(str, Enum):
 
 class Constraint(BaseModel):
     """A single constraint extracted from the query."""
+
     type: ConstraintType
     value: Any = None
     operator: ComparisonOp | None = None
-    field: str = Field(default="", description="What this constraint applies to (e.g. 'stars', 'date')")
+    field: str = Field(
+        default="", description="What this constraint applies to (e.g. 'stars', 'date')"
+    )
     raw_text: str = Field(default="", description="Original text this was extracted from")
     unit: str = Field(default="", description="Unit if applicable (e.g. 'employees', 'dollars')")
 
@@ -47,6 +52,7 @@ class Constraint(BaseModel):
 
 class EntityReference(BaseModel):
     """An extracted entity with disambiguation context."""
+
     text: str
     entity_type: str = Field(default="", description="e.g. 'person', 'company', 'language'")
     disambiguation: str = Field(default="", description="Context to disambiguate")
@@ -56,8 +62,12 @@ class StructuredQuery(BaseModel):
     """The fully parsed, structured representation of a user query."""
 
     original_query: str
-    core_intent: str = Field(default="", description="The main search intent, stripped of constraints")
-    positive_query: str = Field(default="", description="Query with negations removed, for embedding")
+    core_intent: str = Field(
+        default="", description="The main search intent, stripped of constraints"
+    )
+    positive_query: str = Field(
+        default="", description="Query with negations removed, for embedding"
+    )
 
     constraints: list[Constraint] = Field(default_factory=list)
     negations: list[str] = Field(default_factory=list, description="Terms to exclude from results")
@@ -71,5 +81,7 @@ class StructuredQuery(BaseModel):
     retriever_weights: dict[str, float] = Field(
         default_factory=lambda: {"dense": 0.4, "sparse": 0.3, "structured": 0.2, "hyde": 0.1}
     )
-    use_decomposition: bool = Field(default=False, description="Whether to decompose into sub-queries")
+    use_decomposition: bool = Field(
+        default=False, description="Whether to decompose into sub-queries"
+    )
     verification_strategies: list[str] = Field(default_factory=list)

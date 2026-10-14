@@ -27,9 +27,7 @@ def fuse_scores(
     source_quality = _source_quality(doc.document.source)
 
     fused = (
-        semantic * semantic_weight
-        + constraint * constraint_weight
-        + source_quality * source_weight
+        semantic * semantic_weight + constraint * constraint_weight + source_quality * source_weight
     )
     return min(1.0, max(0.0, fused))
 

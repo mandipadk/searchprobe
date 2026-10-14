@@ -46,7 +46,9 @@ class QueryParser:
 
     def __init__(self, config: ArisConfig) -> None:
         self._config = config
-        self._client = anthropic.AsyncAnthropic(api_key=config.anthropic_api_key)
+        # Fall back to the SDK's own credential resolution (ANTHROPIC_API_KEY etc.)
+        # instead of passing an empty key, which disables it.
+        self._client = anthropic.AsyncAnthropic(api_key=config.anthropic_api_key or None)
 
     async def parse(self, query: str) -> StructuredQuery:
         """Parse a query into a StructuredQuery."""
@@ -77,26 +79,30 @@ class QueryParser:
         constraints = []
         for c in data.get("constraints", []):
             try:
-                constraints.append(Constraint(
-                    type=ConstraintType(c.get("type", "boolean")),
-                    value=c.get("value"),
-                    operator=ComparisonOp(c["operator"]) if c.get("operator") else None,
-                    field=c.get("field", ""),
-                    raw_text=c.get("raw_text", ""),
-                    unit=c.get("unit", ""),
-                    value_upper=c.get("value_upper"),
-                    negated_terms=c.get("negated_terms", []),
-                ))
+                constraints.append(
+                    Constraint(
+                        type=ConstraintType(c.get("type", "boolean")),
+                        value=c.get("value"),
+                        operator=ComparisonOp(c["operator"]) if c.get("operator") else None,
+                        field=c.get("field", ""),
+                        raw_text=c.get("raw_text", ""),
+                        unit=c.get("unit", ""),
+                        value_upper=c.get("value_upper"),
+                        negated_terms=c.get("negated_terms", []),
+                    )
+                )
             except (ValueError, KeyError) as e:
                 logger.debug("Skipping malformed constraint: %s", e)
 
         entities = []
         for e in data.get("entities", []):
-            entities.append(EntityReference(
-                text=e.get("text", ""),
-                entity_type=e.get("entity_type", ""),
-                disambiguation=e.get("disambiguation", ""),
-            ))
+            entities.append(
+                EntityReference(
+                    text=e.get("text", ""),
+                    entity_type=e.get("entity_type", ""),
+                    disambiguation=e.get("disambiguation", ""),
+                )
+            )
 
         return StructuredQuery(
             original_query=original,

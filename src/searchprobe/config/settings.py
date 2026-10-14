@@ -52,6 +52,12 @@ class Settings(BaseSettings):
     generation_model: str = "claude-sonnet-5-5"
     generation_effort: str | None = "high"
 
+    # Aris verify-and-rerank wrapper (``aris+exa`` etc.). The verifier defaults
+    # to a different model from ``judge_model`` so a wrapped system is not
+    # graded by the same model that filtered its results.
+    aris_parser_model: str = "claude-opus-5-5"
+    aris_verifier_model: str = "claude-opus-5-5"
+
     @property
     def configured_providers(self) -> list[str]:
         """Return list of providers that have API keys configured."""

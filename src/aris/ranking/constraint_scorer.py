@@ -29,7 +29,7 @@ def apply_constraint_penalty(candidates: list[ScoredDocument]) -> list[ScoredDoc
         # ratio=0.8 -> penalty=0.64
         # ratio=0.5 -> penalty=0.25
         # ratio=0.0 -> penalty=0.0
-        constraint_score = ratio ** 2
+        constraint_score = ratio**2
         doc.verification_score = constraint_score
 
     return candidates

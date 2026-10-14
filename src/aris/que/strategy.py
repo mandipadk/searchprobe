@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from aris.que.models import StructuredQuery
 
-
 # Failure mode -> strategy adjustments
 _MODE_ADJUSTMENTS: dict[str, dict] = {
     "negation_collapse": {
