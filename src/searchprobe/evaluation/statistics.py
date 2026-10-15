@@ -7,6 +7,11 @@ from typing import Any
 import numpy as np
 from scipy import stats
 
+from searchprobe.core.systems import system_key_of
+
+# Statuses that reflect infrastructure failures rather than retrieval quality.
+INFRA_ERROR_STATUSES = frozenset({"search_error", "judge_error"})
+
 
 @dataclass
 class ConfidenceInterval:
@@ -49,9 +54,7 @@ def calculate_confidence_interval(
         ConfidenceInterval with mean, lower, upper bounds
     """
     if not scores:
-        return ConfidenceInterval(
-            mean=0.0, lower=0.0, upper=0.0, confidence=confidence, n=0
-        )
+        return ConfidenceInterval(mean=0.0, lower=0.0, upper=0.0, confidence=confidence, n=0)
 
     n = len(scores)
     mean = np.mean(scores)
@@ -134,9 +137,7 @@ def mann_whitney_test(
         return 0.0, 1.0
 
     try:
-        statistic, p_value = stats.mannwhitneyu(
-            scores_a, scores_b, alternative="two-sided"
-        )
+        statistic, p_value = stats.mannwhitneyu(scores_a, scores_b, alternative="two-sided")
         return float(statistic), float(p_value)
     except Exception:
         return 0.0, 1.0
@@ -165,9 +166,7 @@ def cohens_d(scores_a: list[float], scores_b: list[float]) -> float:
     var_a = np.var(scores_a, ddof=1) if n_a > 1 else 0
     var_b = np.var(scores_b, ddof=1) if n_b > 1 else 0
 
-    pooled_std = math.sqrt(
-        ((n_a - 1) * var_a + (n_b - 1) * var_b) / (n_a + n_b - 2)
-    )
+    pooled_std = math.sqrt(((n_a - 1) * var_a + (n_b - 1) * var_b) / (n_a + n_b - 2))
 
     if pooled_std == 0:
         return 0.0
@@ -208,18 +207,15 @@ def bootstrap_confidence_interval(
         )
 
     rng = np.random.default_rng(42)
-    bootstrap_stats = np.array([
-        float(stat_func(rng.choice(arr, size=n, replace=True)))
-        for _ in range(n_bootstrap)
-    ])
+    bootstrap_stats = np.array(
+        [float(stat_func(rng.choice(arr, size=n, replace=True))) for _ in range(n_bootstrap)]
+    )
 
     alpha = 1 - confidence
     lower = float(np.percentile(bootstrap_stats, 100 * alpha / 2))
     upper = float(np.percentile(bootstrap_stats, 100 * (1 - alpha / 2)))
 
-    return ConfidenceInterval(
-        mean=observed, lower=lower, upper=upper, confidence=confidence, n=n
-    )
+    return ConfidenceInterval(mean=observed, lower=lower, upper=upper, confidence=confidence, n=n)
 
 
 def benjamini_hochberg(p_values: list[float], alpha: float = 0.05) -> list[bool]:
@@ -244,7 +240,7 @@ def benjamini_hochberg(p_values: list[float], alpha: float = 0.05) -> list[bool]
     significant = [False] * m
     # Find the largest k such that p_(k) <= k/m * alpha
     max_k = -1
-    for k, (orig_idx, p_val) in enumerate(indexed, 1):
+    for k, (_orig_idx, p_val) in enumerate(indexed, 1):
         threshold = (k / m) * alpha
         if p_val <= threshold:
             max_k = k
@@ -256,6 +252,84 @@ def benjamini_hochberg(p_values: list[float], alpha: float = 0.05) -> list[bool]
             significant[orig_idx] = True
 
     return significant
+
+
+def bootstrap_difference_ci(
+    scores_a: list[float],
+    scores_b: list[float],
+    confidence: float = 0.95,
+    n_bootstrap: int = 10000,
+    seed: int = 42,
+) -> ConfidenceInterval:
+    """Bootstrap CI for mean(A) - mean(B) with independent samples."""
+    if not scores_a or not scores_b:
+        return ConfidenceInterval(mean=0.0, lower=0.0, upper=0.0, confidence=confidence, n=0)
+    a = np.asarray(scores_a, dtype=float)
+    b = np.asarray(scores_b, dtype=float)
+    rng = np.random.default_rng(seed)
+    idx_a = rng.integers(0, len(a), size=(n_bootstrap, len(a)))
+    idx_b = rng.integers(0, len(b), size=(n_bootstrap, len(b)))
+    diffs = a[idx_a].mean(axis=1) - b[idx_b].mean(axis=1)
+    alpha = 1 - confidence
+    return ConfidenceInterval(
+        mean=float(a.mean() - b.mean()),
+        lower=float(np.percentile(diffs, 100 * alpha / 2)),
+        upper=float(np.percentile(diffs, 100 * (1 - alpha / 2))),
+        confidence=confidence,
+        n=min(len(a), len(b)),
+    )
+
+
+def quality_evaluations(evaluations: list[dict]) -> list[dict]:
+    """Drop evaluations whose status reflects infrastructure, not retrieval quality."""
+    return [e for e in evaluations if e.get("status", "ok") not in INFRA_ERROR_STATUSES]
+
+
+def align_paired(
+    evaluations: list[dict],
+    system_a: str,
+    system_b: str,
+    score_key: str = "weighted_score",
+) -> tuple[list[float], list[float], list[str]]:
+    """Align two systems' scores on the queries both were successfully evaluated on.
+
+    Returns:
+        (scores_a, scores_b, query_ids) in matching order.
+    """
+    by_system: dict[str, dict[str, float]] = {system_a: {}, system_b: {}}
+    for e in quality_evaluations(evaluations):
+        key = system_key_of(e)
+        if key in by_system:
+            by_system[key][e["query_id"]] = float(e.get(score_key) or 0.0)
+    common = sorted(set(by_system[system_a]) & set(by_system[system_b]))
+    return (
+        [by_system[system_a][q] for q in common],
+        [by_system[system_b][q] for q in common],
+        common,
+    )
+
+
+def compare_all_systems(
+    evaluations: list[dict],
+    alpha: float = 0.05,
+    score_key: str = "weighted_score",
+) -> list[ComparisonResult]:
+    """Paired comparison of every pair of systems, with Benjamini-Hochberg correction.
+
+    ``significant`` on each result reflects the FDR-corrected decision.
+    """
+    systems = sorted({system_key_of(e) for e in quality_evaluations(evaluations)})
+    comparisons: list[ComparisonResult] = []
+    for i, sys_a in enumerate(systems):
+        for sys_b in systems[i + 1 :]:
+            a, b, _ = align_paired(evaluations, sys_a, sys_b, score_key)
+            if not a:
+                continue
+            comparisons.append(compare_providers(sys_a, a, sys_b, b, paired=True))
+    decisions = benjamini_hochberg([c.p_value for c in comparisons], alpha)
+    for comp, decision in zip(comparisons, decisions):
+        comp.significant = decision
+    return comparisons
 
 
 def compare_providers(
@@ -281,18 +355,14 @@ def compare_providers(
     mean_b = np.mean(scores_b) if scores_b else 0.0
     mean_diff = float(mean_a - mean_b)
 
-    # Confidence interval for difference
-    if paired and len(scores_a) == len(scores_b):
+    if paired:
+        if len(scores_a) != len(scores_b):
+            raise ValueError("Paired comparison needs aligned score lists (see align_paired)")
         diffs = [a - b for a, b in zip(scores_a, scores_b)]
-        diff_ci = calculate_confidence_interval(diffs)
+        diff_ci = bootstrap_confidence_interval(diffs)
         _, p_value = wilcoxon_signed_rank_test(scores_a, scores_b)
     else:
-        diff_ci = ConfidenceInterval(
-            mean=mean_diff,
-            lower=mean_diff - 0.1,  # Approximation
-            upper=mean_diff + 0.1,
-            n=min(len(scores_a), len(scores_b)),
-        )
+        diff_ci = bootstrap_difference_ci(scores_a, scores_b)
         _, p_value = mann_whitney_test(scores_a, scores_b)
 
     effect = cohens_d(scores_a, scores_b)
@@ -324,7 +394,7 @@ def aggregate_by_category(
 
     for eval_item in evaluations:
         category = eval_item.get("category", "unknown")
-        provider_key = f"{eval_item.get('provider', 'unknown')}:{eval_item.get('search_mode', 'default')}"
+        provider_key = system_key_of(eval_item)
         score = eval_item.get("weighted_score", 0.0)
 
         if category not in grouped:
@@ -359,17 +429,14 @@ def aggregate_by_provider(
     grouped: dict[str, list[float]] = {}
 
     for eval_item in evaluations:
-        provider_key = f"{eval_item.get('provider', 'unknown')}:{eval_item.get('search_mode', 'default')}"
+        provider_key = system_key_of(eval_item)
         score = eval_item.get("weighted_score", 0.0)
 
         if provider_key not in grouped:
             grouped[provider_key] = []
         grouped[provider_key].append(score)
 
-    return {
-        provider: calculate_confidence_interval(scores)
-        for provider, scores in grouped.items()
-    }
+    return {provider: calculate_confidence_interval(scores) for provider, scores in grouped.items()}
 
 
 def failure_mode_frequency(
@@ -394,28 +461,43 @@ def failure_mode_frequency(
 
 
 def summary_statistics(evaluations: list[dict]) -> dict[str, Any]:
-    """Calculate summary statistics for evaluation results.
+    """Summary statistics over quality-bearing evaluations.
 
-    Args:
-        evaluations: List of evaluation dicts
-
-    Returns:
-        Dictionary with summary statistics
+    Infrastructure failures (search/judge errors) are excluded from the score
+    statistics and reported separately as ``error_rate_by_system``.
     """
     if not evaluations:
         return {"count": 0}
 
-    scores = [e.get("weighted_score", 0.0) for e in evaluations]
+    quality = quality_evaluations(evaluations)
+    totals: dict[str, int] = {}
+    errors: dict[str, int] = {}
+    for e in evaluations:
+        key = system_key_of(e)
+        totals[key] = totals.get(key, 0) + 1
+        if e.get("status", "ok") in INFRA_ERROR_STATUSES:
+            errors[key] = errors.get(key, 0) + 1
+    error_rates = {k: errors.get(k, 0) / v for k, v in totals.items()}
 
+    if not quality:
+        return {
+            "count": 0,
+            "excluded_errors": len(evaluations),
+            "error_rate_by_system": error_rates,
+        }
+
+    scores = [e.get("weighted_score", 0.0) for e in quality]
     return {
-        "count": len(evaluations),
+        "count": len(quality),
+        "excluded_errors": len(evaluations) - len(quality),
         "mean": float(np.mean(scores)),
         "median": float(np.median(scores)),
         "std": float(np.std(scores)),
         "min": float(np.min(scores)),
         "max": float(np.max(scores)),
         "ci_95": calculate_confidence_interval(scores),
-        "by_provider": aggregate_by_provider(evaluations),
-        "by_category": aggregate_by_category(evaluations),
+        "by_provider": aggregate_by_provider(quality),
+        "by_category": aggregate_by_category(quality),
         "failure_modes": failure_mode_frequency(evaluations),
+        "error_rate_by_system": error_rates,
     }

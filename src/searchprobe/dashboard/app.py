@@ -1,7 +1,6 @@
 """Streamlit dashboard entry point."""
 
 import streamlit as st
-from pathlib import Path
 
 from searchprobe.config import get_settings
 from searchprobe.storage import Database
@@ -23,7 +22,8 @@ def run_dashboard() -> None:
     )
 
     # Custom CSS
-    st.markdown("""
+    st.markdown(
+        """
     <style>
     .main-header {
         font-size: 2.5rem;
@@ -43,7 +43,9 @@ def run_dashboard() -> None:
         border-radius: 8px;
     }
     </style>
-    """, unsafe_allow_html=True)
+    """,
+        unsafe_allow_html=True,
+    )
 
     # Sidebar navigation
     st.sidebar.title("🔍 SearchProbe")
@@ -53,6 +55,7 @@ def run_dashboard() -> None:
     page = st.sidebar.radio(
         "Navigate",
         [
+            "🎯 Scorecard",
             "📊 Overview",
             "🏆 Provider Comparison",
             "📁 Category Deep Dive",
@@ -79,32 +82,46 @@ def run_dashboard() -> None:
     )
 
     st.sidebar.markdown("---")
-    st.sidebar.info(f"**Run ID:** `{selected_run['id'][:8]}...`\n\n**Started:** {selected_run['started_at'][:19] if selected_run.get('started_at') else 'N/A'}")
+    st.sidebar.info(
+        f"**Run ID:** `{selected_run['id'][:8]}...`\n\n**Started:** {selected_run['started_at'][:19] if selected_run.get('started_at') else 'N/A'}"
+    )
 
     # Route to page
-    if page == "📊 Overview":
+    if page == "🎯 Scorecard":
+        from searchprobe.dashboard.pages.scorecard import render
+
+        render(db, selected_run["id"])
+    elif page == "📊 Overview":
         from searchprobe.dashboard.pages.overview import render
+
         render(db, selected_run["id"])
     elif page == "🏆 Provider Comparison":
         from searchprobe.dashboard.pages.provider_comparison import render
+
         render(db, selected_run["id"])
     elif page == "📁 Category Deep Dive":
         from searchprobe.dashboard.pages.category_deep_dive import render
+
         render(db, selected_run["id"])
     elif page == "🔎 Query Explorer":
         from searchprobe.dashboard.pages.query_explorer import render
+
         render(db, selected_run["id"])
     elif page == "⚠️ Failure Analysis":
         from searchprobe.dashboard.pages.failure_analysis import render
+
         render(db, selected_run["id"])
     elif page == "🧬 Embedding Geometry":
         from searchprobe.dashboard.pages.embedding_geometry import render
+
         render(db, selected_run["id"])
     elif page == "🔧 Robustness Analysis":
         from searchprobe.dashboard.pages.robustness import render
+
         render(db, selected_run["id"])
     elif page == "✅ Cross-Encoder Validation":
         from searchprobe.dashboard.pages.validation import render
+
         render(db, selected_run["id"])
 
 

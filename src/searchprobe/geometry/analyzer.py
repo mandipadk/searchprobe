@@ -27,7 +27,6 @@ from searchprobe.geometry.vulnerability import (
 )
 from searchprobe.queries.taxonomy import AdversarialCategory
 
-
 DEFAULT_MODELS = [
     "all-MiniLM-L6-v2",
     "all-mpnet-base-v2",
@@ -37,11 +36,11 @@ DEFAULT_MODELS = [
 class EmbeddingGeometryAnalyzer:
     """Analyzes geometric properties of embedding spaces to explain search failures.
 
-    This is the core research module. Instead of just testing THAT search fails,
-    it measures WHY by analyzing the geometric properties of the embedding space.
-
-    Key insight: If cos(embed("companies in AI"), embed("companies NOT in AI")) = 0.96,
-    then ANY embedding-based retrieval system will fail on negation.
+    Measures query-to-query similarity on curated pairs. This is a descriptive
+    visualization, not evidence of retrieval failure: retrieval depends on
+    query-to-*document* scores. For a test of whether a retriever prefers a
+    satisfying document over a violating one, use ``searchprobe explain``
+    (triplet probes), which also links failures per case to search providers.
     """
 
     def __init__(
@@ -145,13 +144,15 @@ class EmbeddingGeometryAnalyzer:
         for pair in adversarial_pairs:
             result = self.compute_pair_similarity(pair, model_name)
             profile.adversarial_similarities.append(result.cosine_similarity)
-            profile.pair_details.append({
-                "query_a": pair.query_a,
-                "query_b": pair.query_b,
-                "similarity": result.cosine_similarity,
-                "angular_distance": result.angular_distance,
-                "relationship": pair.expected_relationship,
-            })
+            profile.pair_details.append(
+                {
+                    "query_a": pair.query_a,
+                    "query_b": pair.query_b,
+                    "similarity": result.cosine_similarity,
+                    "angular_distance": result.angular_distance,
+                    "relationship": pair.expected_relationship,
+                }
+            )
             all_adversarial_texts.extend([pair.query_a, pair.query_b])
 
         # Compute baseline similarities

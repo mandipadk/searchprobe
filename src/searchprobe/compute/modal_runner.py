@@ -39,6 +39,7 @@ class ModalRunner:
         """Lazy-import the Modal app and return function references."""
         if self._app_ref is None:
             import modal
+
             self._app_ref = modal.App.lookup("searchprobe")
         return self._app_ref
 
@@ -58,6 +59,7 @@ class ModalRunner:
             Dict with vulnerability_matrix, profiles, and per-model details.
         """
         import modal
+
         analyze_fn = modal.Function.from_name("searchprobe", "analyze_geometry")
         return analyze_fn.remote(models=models, categories=categories)
 
@@ -78,9 +80,12 @@ class ModalRunner:
             Dict with scores, original_ndcg, reranked_ndcg, ndcg_improvement, kendall_tau.
         """
         import modal
+
         validate_fn = modal.Function.from_name("searchprobe", "validate_cross_encoder")
         return validate_fn.remote(
-            query_text=query, results=results, model_name=model_name,
+            query_text=query,
+            results=results,
+            model_name=model_name,
         )
 
     def batch_validate(
@@ -98,6 +103,7 @@ class ModalRunner:
             List of validation result dicts.
         """
         import modal
+
         batch_fn = modal.Function.from_name("searchprobe", "batch_validate")
         return batch_fn.remote(items=items, model_name=model_name)
 
@@ -116,6 +122,7 @@ class ModalRunner:
             List of embedding vectors (nested lists of floats).
         """
         import modal
+
         encode_fn = modal.Function.from_name("searchprobe", "encode_texts")
         return encode_fn.remote(texts=texts, model_name=model_name)
 
@@ -136,7 +143,10 @@ class ModalRunner:
             List of dicts with fitness, ndcg_improvement, original_ndcg, reranked_ndcg.
         """
         import modal
+
         fitness_fn = modal.Function.from_name("searchprobe", "compute_fitness_batch")
         return fitness_fn.remote(
-            queries=queries, search_results=search_results, model_name=model_name,
+            queries=queries,
+            search_results=search_results,
+            model_name=model_name,
         )

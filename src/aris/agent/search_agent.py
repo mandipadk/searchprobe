@@ -8,9 +8,8 @@ import time
 from aris.agent.evaluator import ResultEvaluator
 from aris.agent.reformulator import QueryReformulator
 from aris.core.config import ArisConfig
-from aris.core.models import ArisResponse, SearchResult, ScoredDocument
+from aris.core.models import ArisResponse, ScoredDocument, SearchResult
 from aris.que.engine import QueryUnderstandingEngine
-from aris.que.models import StructuredQuery
 from aris.ranking.engine import RankingEngine
 from aris.retrieval.engine import RetrievalEngine
 from aris.sources.base import DataSource
@@ -66,9 +65,7 @@ class SearchAgent:
 
             if not candidates:
                 if iteration < max_iterations:
-                    structured = self._reformulator.reformulate(
-                        structured, "No results", iteration
-                    )
+                    structured = self._reformulator.reformulate(structured, "No results", iteration)
                     continue
                 break
 

@@ -33,9 +33,7 @@ class ProviderRegistry:
     }
 
     @classmethod
-    def get_provider(
-        cls, name: str, settings: Settings | None = None
-    ) -> SearchProvider:
+    def get_provider(cls, name: str, settings: Settings | None = None) -> SearchProvider:
         """Get a configured provider instance by name.
 
         Args:
@@ -48,11 +46,14 @@ class ProviderRegistry:
         Raises:
             ValueError: If provider not found or not configured
         """
-        if name not in cls.PROVIDERS:
-            raise ValueError(f"Unknown provider: {name}. Available: {list(cls.PROVIDERS.keys())}")
-
         if settings is None:
             settings = get_settings()
+
+        if name.startswith("aris+"):
+            return cls._wrap_with_aris(name.split("+", 1)[1], settings)
+
+        if name not in cls.PROVIDERS:
+            raise ValueError(f"Unknown provider: {name}. Available: {list(cls.PROVIDERS.keys())}")
 
         # Get API key from settings
         api_key_attr = cls.API_KEY_ATTRS.get(name)
@@ -70,9 +71,24 @@ class ProviderRegistry:
         return provider_class(api_key=api_key)
 
     @classmethod
-    def get_all_configured(
-        cls, settings: Settings | None = None
-    ) -> dict[str, SearchProvider]:
+    def _wrap_with_aris(cls, base_name: str, settings: Settings) -> SearchProvider:
+        """``aris+<base>``: the base provider behind Aris's verify-and-rerank layer."""
+        from aris.wrapper import ConstraintAwareSearch
+        from searchprobe.evidence import EvidenceFetcher, EvidenceStore
+        from searchprobe.llm import get_async_client
+
+        base = cls.get_provider(base_name, settings)
+        client = get_async_client(settings) if settings.has_anthropic_configured() else None
+        return ConstraintAwareSearch(
+            base,
+            client,
+            parser_model=settings.aris_parser_model,
+            verifier_model=settings.aris_verifier_model,
+            fetcher=EvidenceFetcher(EvidenceStore(settings.database_path)),
+        )
+
+    @classmethod
+    def get_all_configured(cls, settings: Settings | None = None) -> dict[str, SearchProvider]:
         """Get all providers that have API keys configured.
 
         Args:

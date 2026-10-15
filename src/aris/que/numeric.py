@@ -3,10 +3,9 @@
 from __future__ import annotations
 
 import re
-from typing import Any
 
+from aris.core.numbers import to_float
 from aris.que.models import ComparisonOp, Constraint, ConstraintType
-
 
 # Patterns for numeric expressions
 _NUMERIC_PATTERNS = [
@@ -28,13 +27,9 @@ _NUMERIC_PATTERNS = [
 ]
 
 
-def _parse_number(s: str) -> float:
-    """Parse a number string, handling commas and common suffixes."""
-    s = s.replace(",", "")
-    multipliers = {"k": 1_000, "m": 1_000_000, "b": 1_000_000_000}
-    if s and s[-1].lower() in multipliers:
-        return float(s[:-1]) * multipliers[s[-1].lower()]
-    return float(s)
+def _parse_number(s: str) -> float | None:
+    """Parse a number string (commas, k/m/b suffixes); None if it is not a number."""
+    return to_float(s)
 
 
 def extract_numeric_constraints(query: str) -> list[Constraint]:
@@ -54,26 +49,34 @@ def extract_numeric_constraints(query: str) -> list[Constraint]:
             if op == ComparisonOp.BETWEEN:
                 value = _parse_number(groups[0])
                 value_upper = _parse_number(groups[1])
+                if value is None or value_upper is None:
+                    continue  # e.g. "about," matched punctuation; not a number
                 unit = groups[2].strip() if len(groups) > 2 else ""
-                constraints.append(Constraint(
-                    type=ConstraintType.NUMERIC,
-                    value=value,
-                    value_upper=value_upper,
-                    operator=op,
-                    field=unit,
-                    unit=unit,
-                    raw_text=match.group(0),
-                ))
+                constraints.append(
+                    Constraint(
+                        type=ConstraintType.NUMERIC,
+                        value=value,
+                        value_upper=value_upper,
+                        operator=op,
+                        field=unit,
+                        unit=unit,
+                        raw_text=match.group(0),
+                    )
+                )
             else:
                 value = _parse_number(groups[0])
+                if value is None:
+                    continue
                 unit = groups[1].strip() if len(groups) > 1 else ""
-                constraints.append(Constraint(
-                    type=ConstraintType.NUMERIC,
-                    value=value,
-                    operator=op,
-                    field=unit,
-                    unit=unit,
-                    raw_text=match.group(0),
-                ))
+                constraints.append(
+                    Constraint(
+                        type=ConstraintType.NUMERIC,
+                        value=value,
+                        operator=op,
+                        field=unit,
+                        unit=unit,
+                        raw_text=match.group(0),
+                    )
+                )
 
     return constraints

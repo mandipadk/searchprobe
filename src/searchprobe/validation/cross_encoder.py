@@ -8,7 +8,6 @@ from scipy import stats as scipy_stats
 
 from searchprobe.validation.models import CrossEncoderScore, ValidationResult
 
-
 DEFAULT_CROSS_ENCODER = "cross-encoder/ms-marco-MiniLM-L-12-v2"
 
 
@@ -72,10 +71,11 @@ class CrossEncoderValidator:
                 doc_text = doc_text[:512]
             pairs.append((query, doc_text))
 
-        # Score all pairs
-        scores = model.predict(pairs)
-        if not isinstance(scores, np.ndarray):
-            scores = np.array(scores)
+        # Score all pairs. MS MARCO cross-encoders return raw logits (their
+        # config sets an Identity activation); map them to (0, 1) with a sigmoid
+        # so they can serve as non-negative gains.
+        scores = np.asarray(model.predict(pairs), dtype=float)
+        scores = to_probability(scores)
 
         # Build CrossEncoderScore objects
         ce_scores = []
@@ -170,6 +170,14 @@ class CrossEncoderValidator:
         )
 
 
+def to_probability(scores: np.ndarray) -> np.ndarray:
+    """Map scores to [0, 1]; values already in [0, 1] are left unchanged."""
+    scores = np.asarray(scores, dtype=float)
+    if scores.size and (scores.min() < 0.0 or scores.max() > 1.0):
+        return 1.0 / (1.0 + np.exp(-scores))
+    return scores
+
+
 def _compute_ndcg(relevance_scores: list[float], k: int | None = None) -> float:
     """Compute Normalized Discounted Cumulative Gain.
 
@@ -182,6 +190,8 @@ def _compute_ndcg(relevance_scores: list[float], k: int | None = None) -> float:
     """
     if not relevance_scores:
         return 0.0
+    if min(relevance_scores) < 0:
+        raise ValueError("nDCG gains must be non-negative (apply to_probability to logits)")
 
     if k is not None:
         relevance_scores = relevance_scores[:k]

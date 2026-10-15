@@ -12,9 +12,9 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections import defaultdict
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import datetime
-from typing import Any, Callable, Protocol
+from typing import Any, Protocol
 
 from searchprobe.core.protocols import AnalysisResult
 from searchprobe.core.signals import Signal, SignalBus, SignalType
@@ -153,15 +153,20 @@ class ResearchSession:
         completed = 0
 
         for level in levels:
-            async def _execute_stage(stage_name: str) -> tuple[str, AnalysisResult]:
-                if progress_callback:
-                    progress_callback(stage_name, completed, total)
 
-                self.signal_bus.emit(Signal(
-                    type=SignalType.STAGE_STARTED,
-                    source="session",
-                    data={"stage": stage_name, "total": total},
-                ))
+            async def _execute_stage(
+                stage_name: str, done: int = completed
+            ) -> tuple[str, AnalysisResult]:
+                if progress_callback:
+                    progress_callback(stage_name, done, total)
+
+                self.signal_bus.emit(
+                    Signal(
+                        type=SignalType.STAGE_STARTED,
+                        source="session",
+                        data={"stage": stage_name, "total": total},
+                    )
+                )
 
                 logger.info("Executing stage: %s", stage_name)
 
@@ -175,15 +180,17 @@ class ResearchSession:
                 try:
                     _, result = await _execute_stage(stage_name)
                     self.context.add_result(stage_name, result)
-                    self.signal_bus.emit(Signal(
-                        type=SignalType.STAGE_COMPLETED,
-                        source="session",
-                        data={
-                            "stage": stage_name,
-                            "summary": result.summary,
-                            "signal_count": len(result.signals),
-                        },
-                    ))
+                    self.signal_bus.emit(
+                        Signal(
+                            type=SignalType.STAGE_COMPLETED,
+                            source="session",
+                            data={
+                                "stage": stage_name,
+                                "summary": result.summary,
+                                "signal_count": len(result.signals),
+                            },
+                        )
+                    )
                     logger.info("Stage %s completed: %d signals", stage_name, len(result.signals))
                 except Exception:
                     logger.exception("Stage %s failed", stage_name)
@@ -193,24 +200,24 @@ class ResearchSession:
                 # Multiple independent stages — run concurrently
                 logger.info("Running %d stages in parallel: %s", len(level), level)
                 try:
-                    results = await asyncio.gather(
-                        *[_execute_stage(name) for name in level]
-                    )
+                    results = await asyncio.gather(*[_execute_stage(name) for name in level])
                 except Exception:
                     logger.exception("Parallel stage execution failed")
                     raise
 
                 for stage_name, result in results:
                     self.context.add_result(stage_name, result)
-                    self.signal_bus.emit(Signal(
-                        type=SignalType.STAGE_COMPLETED,
-                        source="session",
-                        data={
-                            "stage": stage_name,
-                            "summary": result.summary,
-                            "signal_count": len(result.signals),
-                        },
-                    ))
+                    self.signal_bus.emit(
+                        Signal(
+                            type=SignalType.STAGE_COMPLETED,
+                            source="session",
+                            data={
+                                "stage": stage_name,
+                                "summary": result.summary,
+                                "signal_count": len(result.signals),
+                            },
+                        )
+                    )
                     logger.info("Stage %s completed: %d signals", stage_name, len(result.signals))
                     completed += 1
 
@@ -240,7 +247,9 @@ class ResearchSession:
         from searchprobe.providers.resilient import ResilientProvider
 
         session = cls()
-        session.context.metadata["profile"] = profile.to_dict() if hasattr(profile, "to_dict") else {}
+        session.context.metadata["profile"] = (
+            profile.to_dict() if hasattr(profile, "to_dict") else {}
+        )
 
         # Get a provider for modules that need one
         provider = None

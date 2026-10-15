@@ -1,8 +1,9 @@
 """Failure analysis page."""
 
-import streamlit as st
 import pandas as pd
+import streamlit as st
 
+from searchprobe.core.systems import system_key_of
 from searchprobe.evaluation.statistics import failure_mode_frequency
 from searchprobe.reporting.charts import create_failure_mode_chart
 from searchprobe.storage import Database
@@ -22,13 +23,15 @@ def render(db: Database, run_id: str) -> None:
     all_failures = []
     for e in evaluations:
         for mode in e.get("failure_modes", []):
-            all_failures.append({
-                "mode": mode,
-                "provider": f"{e.get('provider')}:{e.get('search_mode', 'default')}",
-                "category": e.get("category"),
-                "query": e.get("query_text"),
-                "score": e.get("weighted_score", 0),
-            })
+            all_failures.append(
+                {
+                    "mode": mode,
+                    "provider": system_key_of(e),
+                    "category": e.get("category"),
+                    "query": e.get("query_text"),
+                    "score": e.get("weighted_score", 0),
+                }
+            )
 
     if not all_failures:
         st.success("No failures recorded! All results passed evaluation.")
@@ -37,7 +40,7 @@ def render(db: Database, run_id: str) -> None:
     # Summary metrics
     col1, col2, col3 = st.columns(3)
 
-    unique_modes = set(f["mode"] for f in all_failures)
+    unique_modes = {f["mode"] for f in all_failures}
     with col1:
         st.metric("Total Failures", len(all_failures))
     with col2:
@@ -51,9 +54,9 @@ def render(db: Database, run_id: str) -> None:
     # Failure mode distribution
     st.subheader("Failure Mode Distribution")
 
-    failure_counts = failure_mode_frequency([{
-        "failure_modes": e.get("failure_modes", [])
-    } for e in evaluations])
+    failure_counts = failure_mode_frequency(
+        [{"failure_modes": e.get("failure_modes", [])} for e in evaluations]
+    )
 
     if failure_counts:
         fig = create_failure_mode_chart(failure_counts, top_n=15, height=500)
@@ -74,10 +77,12 @@ def render(db: Database, run_id: str) -> None:
 
     for provider, modes in provider_failures.items():
         with st.expander(f"{provider} ({sum(modes.values())} failures)"):
-            df = pd.DataFrame([
-                {"Mode": k, "Count": v}
-                for k, v in sorted(modes.items(), key=lambda x: x[1], reverse=True)
-            ])
+            df = pd.DataFrame(
+                [
+                    {"Mode": k, "Count": v}
+                    for k, v in sorted(modes.items(), key=lambda x: x[1], reverse=True)
+                ]
+            )
             st.dataframe(df, use_container_width=True)
 
     st.markdown("---")
@@ -95,10 +100,12 @@ def render(db: Database, run_id: str) -> None:
 
     for category, modes in sorted(category_failures.items()):
         with st.expander(f"{category.replace('_', ' ').title()} ({sum(modes.values())} failures)"):
-            df = pd.DataFrame([
-                {"Mode": k, "Count": v}
-                for k, v in sorted(modes.items(), key=lambda x: x[1], reverse=True)
-            ])
+            df = pd.DataFrame(
+                [
+                    {"Mode": k, "Count": v}
+                    for k, v in sorted(modes.items(), key=lambda x: x[1], reverse=True)
+                ]
+            )
             st.dataframe(df, use_container_width=True)
 
     st.markdown("---")

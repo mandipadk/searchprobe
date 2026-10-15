@@ -17,6 +17,10 @@ from searchprobe.intelligence.taxonomy import FailureClassifier, FailureMode
 logger = logging.getLogger(__name__)
 
 
+# Minimum category points before any correlation is computed.
+MIN_POINTS = 8
+
+
 class CorrelationEngine:
     """Computes cross-module correlations and generates intelligence profiles."""
 
@@ -24,7 +28,8 @@ class CorrelationEngine:
         self.classifier = FailureClassifier()
 
     def build_signal_vectors(
-        self, context: Any  # SharedContext
+        self,
+        context: Any,  # SharedContext
     ) -> dict[str, SignalVector]:
         """Extract per-category metrics from all analysis results.
 
@@ -88,8 +93,8 @@ class CorrelationEngine:
 
         # Build matrix: rows = categories, columns = dimensions
         cats = sorted(vectors.keys())
-        if len(cats) < 3:
-            # Not enough categories for meaningful correlation
+        if len(cats) < MIN_POINTS:
+            # Not enough categories for a meaningful correlation
             return {}
 
         matrix = np.full((len(cats), n_dims), np.nan)
@@ -99,31 +104,38 @@ class CorrelationEngine:
                 if v is not None:
                     matrix[i, j] = v
 
-        correlations: dict[str, dict[str, float | None]] = {}
+        from scipy.stats import spearmanr
+
+        from searchprobe.evaluation.statistics import benjamini_hochberg
+
+        # Spearman rho per dimension pair. A correlation is reported only with
+        # enough points and when it survives Benjamini-Hochberg correction across
+        # all pairs; with ~4-13 category points, |rho| > 0.5 alone is common noise.
+        tested: dict[tuple[int, int], tuple[float, float]] = {}
         for a in range(n_dims):
-            correlations[dim_names[a]] = {}
-            for b in range(n_dims):
-                if a == b:
-                    correlations[dim_names[a]][dim_names[b]] = 1.0
-                    continue
-
-                # Get valid pairs
+            for b in range(a + 1, n_dims):
                 valid = ~np.isnan(matrix[:, a]) & ~np.isnan(matrix[:, b])
-                if valid.sum() < 3:
-                    correlations[dim_names[a]][dim_names[b]] = None
+                if valid.sum() < MIN_POINTS:
                     continue
-
-                from scipy.stats import spearmanr
                 rho, p_value = spearmanr(matrix[valid, a], matrix[valid, b])
-                if np.isnan(rho):
-                    correlations[dim_names[a]][dim_names[b]] = None
-                else:
-                    correlations[dim_names[a]][dim_names[b]] = round(float(rho), 3)
+                if not np.isnan(rho):
+                    tested[(a, b)] = (float(rho), float(p_value))
+        keys = list(tested)
+        significant = dict(zip(keys, benjamini_hochberg([tested[k][1] for k in keys])))
 
+        correlations: dict[str, dict[str, float | None]] = {
+            dim_names[a]: {dim_names[b]: (1.0 if a == b else None) for b in range(n_dims)}
+            for a in range(n_dims)
+        }
+        for (a, b), (rho, _) in tested.items():
+            if significant[(a, b)]:
+                correlations[dim_names[a]][dim_names[b]] = round(rho, 3)
+                correlations[dim_names[b]][dim_names[a]] = round(rho, 3)
         return correlations
 
     def generate_profiles(
-        self, context: Any  # SharedContext
+        self,
+        context: Any,  # SharedContext
     ) -> list[CategoryIntelligenceProfile]:
         """Generate complete intelligence profiles for all categories.
 
@@ -151,14 +163,16 @@ class CorrelationEngine:
             # Generate recommendations
             recommendations = self._generate_recommendations(cat, vector, failure_modes)
 
-            profiles.append(CategoryIntelligenceProfile(
-                category=cat,
-                signal_vector=vector,
-                primary_failure_modes=[m.value for m in failure_modes],
-                risk_score=risk,
-                correlations=correlations,
-                recommendations=recommendations,
-            ))
+            profiles.append(
+                CategoryIntelligenceProfile(
+                    category=cat,
+                    signal_vector=vector,
+                    primary_failure_modes=[m.value for m in failure_modes],
+                    risk_score=risk,
+                    correlations=correlations,
+                    recommendations=recommendations,
+                )
+            )
 
         # Sort by risk score descending
         profiles.sort(key=lambda p: p.risk_score, reverse=True)
@@ -183,7 +197,9 @@ class CorrelationEngine:
 
         if vector.perturbation_stability is not None:
             # Low stability = high risk
-            weighted_sum += (1.0 - vector.perturbation_stability) * weights["perturbation_stability"]
+            weighted_sum += (1.0 - vector.perturbation_stability) * weights[
+                "perturbation_stability"
+            ]
             total_weight += weights["perturbation_stability"]
 
         if vector.embedding_gap is not None:
@@ -205,7 +221,7 @@ class CorrelationEngine:
 
     def _get_failure_modes(self, context: Any, category: str) -> list[FailureMode]:
         """Extract and classify failure modes for a category."""
-        results = context.results if hasattr(context, "results") else {}
+        context.results if hasattr(context, "results") else {}
         # Look for evaluation data with failure modes
         # This would come from the evaluate stage in a full session
         # For now, return based on signals
@@ -233,7 +249,7 @@ class CorrelationEngine:
         active = [dims[i] for i, v in enumerate(values) if v is not None]
 
         for i, a in enumerate(active):
-            for b in active[i + 1:]:
+            for b in active[i + 1 :]:
                 if a in corr_matrix and b in corr_matrix[a]:
                     rho = corr_matrix[a][b]
                     if rho is not None and abs(rho) > 0.5:

@@ -1,7 +1,6 @@
 """Structured logging utilities for SearchProbe."""
 
 import logging
-import sys
 
 from rich.logging import RichHandler
 

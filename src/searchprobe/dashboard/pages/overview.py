@@ -1,14 +1,14 @@
 """Overview page for the dashboard."""
 
-import streamlit as st
 import pandas as pd
+import streamlit as st
 
 from searchprobe.evaluation.statistics import (
-    summary_statistics,
     aggregate_by_category,
-    aggregate_by_provider,
+    quality_evaluations,
+    summary_statistics,
 )
-from searchprobe.reporting.charts import create_radar_chart, create_bar_chart
+from searchprobe.reporting.charts import create_bar_chart, create_radar_chart
 from searchprobe.storage import Database
 
 
@@ -25,13 +25,18 @@ def render(db: Database, run_id: str) -> None:
         return
 
     # Calculate statistics
-    eval_data = [{
-        "category": e.get("category"),
-        "provider": e.get("provider"),
-        "search_mode": e.get("search_mode"),
-        "weighted_score": e.get("weighted_score", 0),
-        "failure_modes": e.get("failure_modes", []),
-    } for e in evaluations]
+    eval_data = [
+        {
+            "category": e.get("category"),
+            "provider": e.get("provider"),
+            "search_mode": e.get("search_mode"),
+            "status": e.get("status") or "ok",
+            "query_id": e.get("query_id"),
+            "weighted_score": e.get("weighted_score", 0),
+            "failure_modes": e.get("failure_modes", []),
+        }
+        for e in evaluations
+    ]
 
     stats = summary_statistics(eval_data)
 
@@ -53,7 +58,7 @@ def render(db: Database, run_id: str) -> None:
     # Radar chart
     st.subheader("Provider Performance by Category")
 
-    by_category = aggregate_by_category(eval_data)
+    by_category = aggregate_by_category(quality_evaluations(eval_data))
     chart_data = {}
     for category, providers in by_category.items():
         for provider_key, ci in providers.items():
@@ -77,19 +82,26 @@ def render(db: Database, run_id: str) -> None:
         if stats.get("by_provider"):
             provider_data = []
             for provider, ci in stats["by_provider"].items():
-                provider_data.append({
-                    "Provider": provider,
-                    "Mean": ci.mean,
-                    "95% CI Lower": ci.lower,
-                    "95% CI Upper": ci.upper,
-                    "n": ci.n,
-                })
+                provider_data.append(
+                    {
+                        "Provider": provider,
+                        "Mean": ci.mean,
+                        "95% CI Lower": ci.lower,
+                        "95% CI Upper": ci.upper,
+                        "n": ci.n,
+                    }
+                )
             df = pd.DataFrame(provider_data)
-            st.dataframe(df.style.format({
-                "Mean": "{:.3f}",
-                "95% CI Lower": "{:.3f}",
-                "95% CI Upper": "{:.3f}",
-            }), use_container_width=True)
+            st.dataframe(
+                df.style.format(
+                    {
+                        "Mean": "{:.3f}",
+                        "95% CI Lower": "{:.3f}",
+                        "95% CI Upper": "{:.3f}",
+                    }
+                ),
+                use_container_width=True,
+            )
 
             # Bar chart
             bar_data = {k: v.mean for k, v in stats["by_provider"].items()}
@@ -101,10 +113,12 @@ def render(db: Database, run_id: str) -> None:
         if stats.get("failure_modes"):
             failure_data = []
             for mode, count in list(stats["failure_modes"].items())[:10]:
-                failure_data.append({
-                    "Failure Mode": mode,
-                    "Count": count,
-                })
+                failure_data.append(
+                    {
+                        "Failure Mode": mode,
+                        "Count": count,
+                    }
+                )
             df = pd.DataFrame(failure_data)
             st.dataframe(df, use_container_width=True)
         else:

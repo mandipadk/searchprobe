@@ -1,11 +1,11 @@
 """Tavily search provider implementation."""
 
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any, ClassVar
 from urllib.parse import urlparse
 
-from searchprobe.providers.base import SearchProvider
+from searchprobe.providers.base import SearchProvider, looks_rate_limited
 from searchprobe.providers.models import SearchRequest, SearchResponse, SearchResult
 
 
@@ -22,6 +22,7 @@ class TavilyProvider(SearchProvider):
         "basic": 0.005,
         "advanced": 0.01,
     }
+    DEFAULT_MODE: ClassVar[str | None] = "advanced"
 
     def __init__(self, api_key: str) -> None:
         """Initialize Tavily client."""
@@ -42,7 +43,7 @@ class TavilyProvider(SearchProvider):
         import asyncio
 
         start_time = time.perf_counter()
-        mode = request.search_mode or "advanced"
+        mode = request.search_mode or self.DEFAULT_MODE
 
         try:
             # Build search parameters
@@ -58,9 +59,7 @@ class TavilyProvider(SearchProvider):
 
             # Execute search (Tavily client is synchronous)
             loop = asyncio.get_event_loop()
-            response = await loop.run_in_executor(
-                None, lambda: self.client.search(**search_kwargs)
-            )
+            response = await loop.run_in_executor(None, lambda: self.client.search(**search_kwargs))
 
             latency_ms = (time.perf_counter() - start_time) * 1000
 
@@ -108,7 +107,7 @@ class TavilyProvider(SearchProvider):
                 results=results,
                 latency_ms=latency_ms,
                 cost_usd=total_cost,
-                timestamp=datetime.now(timezone.utc),
+                timestamp=datetime.now(UTC),
                 metadata={
                     "search_depth": mode,
                     "results_requested": request.num_results,
@@ -122,7 +121,7 @@ class TavilyProvider(SearchProvider):
             latency_ms = (time.perf_counter() - start_time) * 1000
             error_msg = str(e)
 
-            if "rate" in error_msg.lower() or "429" in error_msg:
+            if looks_rate_limited(error_msg):
                 raise RateLimitError(error_msg, provider=self.NAME)
 
             return SearchResponse(
@@ -132,6 +131,6 @@ class TavilyProvider(SearchProvider):
                 results=[],
                 latency_ms=latency_ms,
                 cost_usd=0.0,
-                timestamp=datetime.now(timezone.utc),
+                timestamp=datetime.now(UTC),
                 error=error_msg,
             )

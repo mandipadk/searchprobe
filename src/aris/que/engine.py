@@ -45,9 +45,7 @@ class QueryUnderstandingEngine:
             if neg not in structured.negations:
                 structured.negations.append(neg)
         if structured.negations:
-            structured.positive_query = generate_positive_query(
-                query, structured.negations
-            )
+            structured.positive_query = generate_positive_query(query, structured.negations)
 
         # Stage 3: Enrich numeric constraints
         rule_numeric = extract_numeric_constraints(query)

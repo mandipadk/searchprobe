@@ -34,7 +34,7 @@ def print_benchmark_report(results: dict[str, Any]) -> None:
             avg_results = sum(r["num_results"] for r in query_results) / total
             avg_latency = sum(r["latency_ms"] for r in query_results) / total
 
-            success_rate = f"{successes}/{total} ({successes/total:.0%})"
+            success_rate = f"{successes}/{total} ({successes / total:.0%})"
             style = "green" if successes == total else "yellow" if successes > 0 else "red"
 
             table.add_row(
@@ -55,14 +55,12 @@ def print_benchmark_report(results: dict[str, Any]) -> None:
     summary_table.add_column("Overall Success", width=15)
 
     all_providers: dict[str, dict[str, int]] = {}
-    for category, provider_results in results.items():
+    for provider_results in results.values():
         for provider_name, query_results in provider_results.items():
             if provider_name not in all_providers:
                 all_providers[provider_name] = {"total": 0, "success": 0}
             all_providers[provider_name]["total"] += len(query_results)
-            all_providers[provider_name]["success"] += sum(
-                1 for r in query_results if r["success"]
-            )
+            all_providers[provider_name]["success"] += sum(1 for r in query_results if r["success"])
 
     for provider_name, stats in all_providers.items():
         rate = stats["success"] / stats["total"] if stats["total"] > 0 else 0

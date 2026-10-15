@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import time
 
 import typer
 from rich.console import Console
@@ -22,7 +21,9 @@ def search(
     query: str = typer.Argument(..., help="Search query"),
     num_results: int = typer.Option(10, "--num", "-n", help="Number of results"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Show detailed output"),
-    use_cross_encoder: bool = typer.Option(False, "--rerank", help="Enable cross-encoder reranking"),
+    use_cross_encoder: bool = typer.Option(
+        False, "--rerank", help="Enable cross-encoder reranking"
+    ),
 ) -> None:
     """Search using the full Aris pipeline."""
     asyncio.run(_search(query, num_results, verbose, use_cross_encoder))
@@ -75,7 +76,9 @@ async def _search(query: str, num_results: int, verbose: bool, use_cross_encoder
     )
 
     if verbose and response.predicted_failure_modes:
-        console.print(f"[dim]Predicted failure modes: {', '.join(response.predicted_failure_modes)}[/dim]")
+        console.print(
+            f"[dim]Predicted failure modes: {', '.join(response.predicted_failure_modes)}[/dim]"
+        )
         console.print(f"[dim]Strategy: {response.strategy_used}[/dim]\n")
 
     table = Table(show_header=True, header_style="bold cyan", show_lines=True)
@@ -119,7 +122,9 @@ def serve(
     """Start the Aris API server."""
     try:
         import uvicorn
+
         from aris.api.app import create_app
+
         console.print(f"[bold green]Starting Aris API server on {host}:{port}[/bold green]")
         api_app = create_app()
         uvicorn.run(api_app, host=host, port=port)
@@ -166,7 +171,15 @@ def benchmark(
     categories: list[str] = typer.Option(None, "--category", "-c", help="Categories to test"),
     output: str = typer.Option(None, "--output", "-o", help="Export results to JSON file"),
 ) -> None:
-    """Run Aris benchmark against adversarial query categories."""
+    """[Deprecated] Legacy smoke test (16 queries, success = returned anything).
+
+    For a real evaluation, run Aris as a system inside SearchProbe:
+    `searchprobe run --providers exa,aris+exa` then `searchprobe judge`.
+    """
+    console.print(
+        "[yellow]This legacy benchmark only checks that Aris returns results. For quality, "
+        "run `searchprobe run --providers exa,aris+exa` and `searchprobe judge`.[/yellow]"
+    )
     asyncio.run(_benchmark(categories, output))
 
 
@@ -186,3 +199,41 @@ async def _benchmark(categories: list[str] | None, output: str | None) -> None:
 
 if __name__ == "__main__":
     app()
+
+
+@app.command()
+def wrap(
+    query: str = typer.Argument(..., help="Search query"),
+    base: str = typer.Option("exa", "--base", "-b", help="Base provider (exa, brave, ...)"),
+    mode: str = typer.Option(None, "--mode", "-m", help="Base provider search mode"),
+    num_results: int = typer.Option(10, "--num-results", "-n"),
+) -> None:
+    """Search through the constraint-aware wrapper (parse, over-retrieve, verify, rerank)."""
+    asyncio.run(_wrap(query, base, mode, num_results))
+
+
+async def _wrap(query: str, base: str, mode: str | None, num_results: int) -> None:
+    from searchprobe.providers.models import SearchRequest
+    from searchprobe.providers.registry import ProviderRegistry
+
+    provider = ProviderRegistry.get_provider(f"aris+{base}")
+    try:
+        with console.status("[bold blue]Parsing, retrieving and verifying..."):
+            resp = await provider.search(
+                SearchRequest(query=query, num_results=num_results, search_mode=mode)
+            )
+    finally:
+        await provider.close()
+    if resp.error:
+        console.print(f"[red]{resp.error}[/red]")
+        raise typer.Exit(1)
+    console.print("[bold]Constraints:[/bold] " + "; ".join(resp.metadata.get("constraints", [])))
+    console.print("[bold]Rewrites:[/bold] " + "; ".join(resp.metadata.get("rewrites", [])))
+    for r in resp.results:
+        raw = r.provider_raw or {}
+        verdicts = ", ".join(f"{k}={v}" for k, v in raw.get("aris_verdicts", {}).items())
+        console.print(f"{r.position + 1}. {r.title}\n   {r.url}\n   [dim]{verdicts}[/dim]")
+    console.print(
+        f"[dim]{resp.metadata.get('dropped_violations', 0)} violating results dropped from a "
+        f"pool of {resp.metadata.get('pool', 0)}; cost ${resp.cost_usd:.4f}[/dim]"
+    )

@@ -5,7 +5,7 @@ from pathlib import Path
 
 import typer
 from rich.console import Console
-from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn
+from rich.progress import BarColumn, Progress, SpinnerColumn, TaskProgressColumn, TextColumn
 from rich.table import Table
 
 from searchprobe.config import get_settings
@@ -23,7 +23,16 @@ def session(
         help="Path to a TOML profile file",
     ),
 ) -> None:
-    """Run a full research session defined by a TOML profile."""
+    """[Legacy] Run the original research-module DAG from a TOML profile.
+
+    Superseded by `searchprobe research --profile profiles/research/<name>.toml`,
+    which runs the measured pipeline (cases, search, per-document judging,
+    scorecard, metamorphic tests).
+    """
+    console.print(
+        "[yellow]`session` runs the legacy research-module DAG. For measured results use "
+        "`searchprobe research --profile profiles/research/negation.toml`.[/yellow]"
+    )
     from searchprobe.core.config import SearchProbeProfile
     from searchprobe.intelligence.session import ResearchSession
 
@@ -44,7 +53,7 @@ def session(
         console.print(f"  {prof.description}")
     console.print(f"  Providers: {', '.join(prof.providers)}")
     console.print(f"  Categories: {', '.join(prof.categories) or 'all'}")
-    console.print(f"  Analyses: ", end="")
+    console.print("  Analyses: ", end="")
     analyses = []
     if prof.run_geometry:
         analyses.append("geometry")
@@ -103,7 +112,9 @@ def session(
         elif name == "perturbation":
             key_metric = f"Mean Jaccard: {result.summary.get('mean_jaccard', 'N/A')}"
         elif name == "validation":
-            key_metric = f"Mean NDCG improvement: {result.summary.get('mean_ndcg_improvement', 'N/A')}"
+            key_metric = (
+                f"Mean NDCG improvement: {result.summary.get('mean_ndcg_improvement', 'N/A')}"
+            )
         elif name == "evolution":
             key_metric = f"Best fitness: {result.summary.get('best_fitness', 'N/A')}"
         elif name == "correlation":
@@ -120,7 +131,9 @@ def session(
 
     # Vulnerable categories
     if context.vulnerable_categories:
-        console.print(f"\n[bold red]Vulnerable Categories:[/bold red] {', '.join(context.vulnerable_categories)}")
+        console.print(
+            f"\n[bold red]Vulnerable Categories:[/bold red] {', '.join(context.vulnerable_categories)}"
+        )
 
     # Correlation profiles (if available)
     if "correlation" in context.results:
@@ -147,7 +160,9 @@ def session(
                     f"{sv.get('vulnerability', 'N/A')}",
                     f"{sv.get('stability', 'N/A')}",
                     f"{sv.get('embedding_gap', 'N/A')}",
-                    recs[0][:80] + "..." if recs and len(recs[0]) > 80 else (recs[0] if recs else ""),
+                    recs[0][:80] + "..."
+                    if recs and len(recs[0]) > 80
+                    else (recs[0] if recs else ""),
                 )
 
             console.print(profile_table)

@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import logging
 
-from aris.que.models import Constraint, StructuredQuery
+from aris.que.models import StructuredQuery
 
 logger = logging.getLogger(__name__)
 

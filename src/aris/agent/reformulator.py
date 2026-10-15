@@ -12,9 +12,7 @@ logger = logging.getLogger(__name__)
 class QueryReformulator:
     """Reformulates queries when initial results are insufficient."""
 
-    def reformulate(
-        self, query: StructuredQuery, reason: str, iteration: int
-    ) -> StructuredQuery:
+    def reformulate(self, query: StructuredQuery, reason: str, iteration: int) -> StructuredQuery:
         """Create a reformulated query based on what failed.
 
         Strategies:
@@ -30,7 +28,10 @@ class QueryReformulator:
             reformulated.use_decomposition = True
             # Increase external source weight
             reformulated.retriever_weights = {
-                "dense": 0.25, "sparse": 0.25, "structured": 0.15, "hyde": 0.35,
+                "dense": 0.25,
+                "sparse": 0.25,
+                "structured": 0.15,
+                "hyde": 0.35,
             }
             logger.info("Reformulation %d: broadened query, enabled HyDE", iteration)
 
@@ -41,13 +42,17 @@ class QueryReformulator:
                 removed = reformulated.constraints.pop()
                 logger.info(
                     "Reformulation %d: relaxed constraint '%s'",
-                    iteration, removed.raw_text,
+                    iteration,
+                    removed.raw_text,
                 )
 
             # Also try without decomposition
             reformulated.use_decomposition = False
             reformulated.retriever_weights = {
-                "dense": 0.4, "sparse": 0.3, "structured": 0.1, "hyde": 0.2,
+                "dense": 0.4,
+                "sparse": 0.3,
+                "structured": 0.1,
+                "hyde": 0.2,
             }
 
         return reformulated

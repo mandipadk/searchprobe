@@ -45,11 +45,18 @@ class Settings(BaseSettings):
     # Cost Control
     budget_limit_usd: float = 10.0
 
-    # LLM Settings
-    judge_model: str = "claude-sonnet-4-6"
-    judge_temperature: float = 0.0
-    generation_model: str = "claude-sonnet-4-6"
-    generation_temperature: float = 0.9
+    # LLM Settings. Current Claude models reject sampling parameters, so there is
+    # no temperature setting; ``*_effort`` controls reasoning depth instead.
+    judge_model: str = "claude-sonnet-5-5"
+    judge_effort: str | None = "medium"
+    generation_model: str = "claude-sonnet-5-5"
+    generation_effort: str | None = "high"
+
+    # Aris verify-and-rerank wrapper (``aris+exa`` etc.). The verifier defaults
+    # to a different model from ``judge_model`` so a wrapped system is not
+    # graded by the same model that filtered its results.
+    aris_parser_model: str = "claude-opus-5-5"
+    aris_verifier_model: str = "claude-opus-5-5"
 
     @property
     def configured_providers(self) -> list[str]:
@@ -75,10 +82,7 @@ class Settings(BaseSettings):
 
     def has_anthropic_configured(self) -> bool:
         """Check if Anthropic is available via direct API key or Vertex AI."""
-        return bool(
-            self.anthropic_api_key
-            or (self.use_vertex_ai and self.vertex_project_id)
-        )
+        return bool(self.anthropic_api_key or (self.use_vertex_ai and self.vertex_project_id))
 
 
 @lru_cache

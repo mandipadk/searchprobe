@@ -9,6 +9,7 @@ from __future__ import annotations
 import re
 
 from aris.core.models import Document
+from aris.core.numbers import to_float
 from aris.que.models import ComparisonOp, Constraint
 from aris.verification.models import ConstraintStatus, VerificationResult
 
@@ -19,7 +20,7 @@ def verify_numeric(document: Document, constraint: Constraint) -> VerificationRe
     Extracts numbers from the document and checks them against the constraint.
     """
     text = f"{document.title} {document.snippet} {document.content or ''}"
-    target_value = float(constraint.value) if constraint.value is not None else None
+    target_value = to_float(constraint.value)
 
     if target_value is None:
         return VerificationResult(
@@ -37,9 +38,7 @@ def verify_numeric(document: Document, constraint: Constraint) -> VerificationRe
     matched_numbers = []
 
     for value, context in numbers:
-        if field and field in context.lower():
-            matched_numbers.append(value)
-        elif not field:
+        if field and field in context.lower() or not field:
             matched_numbers.append(value)
 
     if not matched_numbers:
@@ -107,7 +106,9 @@ def _check_comparison(
     if op == ComparisonOp.LTE:
         return value <= target
     if op == ComparisonOp.BETWEEN:
-        upper_val = float(upper) if upper is not None else float("inf")
+        upper_val = to_float(upper) if upper is not None else float("inf")
+        if upper_val is None:
+            return False
         return target <= value <= upper_val
     if op == ComparisonOp.APPROX:
         margin = target * 0.15  # 15% margin

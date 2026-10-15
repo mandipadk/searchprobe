@@ -44,7 +44,9 @@ def filter_negations(
     if removed_count > 0:
         logger.info(
             "Negation filter: removed %d/%d documents matching %s",
-            removed_count, len(documents), negated_terms,
+            removed_count,
+            len(documents),
+            negated_terms,
         )
 
     return filtered

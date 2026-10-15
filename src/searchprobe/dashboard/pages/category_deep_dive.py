@@ -1,10 +1,11 @@
 """Category deep dive page."""
 
-import streamlit as st
 import pandas as pd
+import streamlit as st
 
-from searchprobe.queries.taxonomy import AdversarialCategory, CATEGORY_METADATA
-from searchprobe.evaluation.statistics import aggregate_by_category, calculate_confidence_interval
+from searchprobe.core.systems import system_key_of
+from searchprobe.evaluation.statistics import calculate_confidence_interval
+from searchprobe.queries.taxonomy import CATEGORY_METADATA, AdversarialCategory
 from searchprobe.reporting.charts import create_bar_chart
 from searchprobe.storage import Database
 
@@ -20,13 +21,11 @@ def render(db: Database, run_id: str) -> None:
         return
 
     # Get unique categories
-    categories = sorted(set(e.get("category", "unknown") for e in evaluations))
+    categories = sorted({e.get("category", "unknown") for e in evaluations})
 
     # Category selection
     selected_category = st.selectbox(
-        "Select Category",
-        categories,
-        format_func=lambda x: x.replace("_", " ").title()
+        "Select Category", categories, format_func=lambda x: x.replace("_", " ").title()
     )
 
     st.markdown("---")
@@ -34,12 +33,12 @@ def render(db: Database, run_id: str) -> None:
     # Show category metadata
     try:
         cat_enum = AdversarialCategory(selected_category)
-        metadata = CATEGORY_METADATA.get(cat_enum, {})
-        if metadata:
+        metadata = CATEGORY_METADATA.get(cat_enum)
+        if metadata is not None:
             with st.expander("Category Information", expanded=True):
-                st.write(f"**Description:** {metadata.get('description', 'N/A')}")
-                st.write(f"**Failure Hypothesis:** {metadata.get('failure_hypothesis', 'N/A')}")
-                st.write(f"**Difficulty:** {metadata.get('difficulty', 'N/A')}")
+                st.write(f"**Description:** {metadata.description}")
+                st.write(f"**Failure Hypothesis:** {metadata.failure_hypothesis}")
+                st.write(f"**Difficulty:** {metadata.difficulty}")
     except ValueError:
         pass
 
@@ -68,7 +67,7 @@ def render(db: Database, run_id: str) -> None:
 
     provider_scores: dict[str, list[float]] = {}
     for e in category_evals:
-        provider_key = f"{e.get('provider', 'unknown')}:{e.get('search_mode', 'default')}"
+        provider_key = system_key_of(e)
         if provider_key not in provider_scores:
             provider_scores[provider_key] = []
         provider_scores[provider_key].append(e.get("weighted_score", 0))
@@ -87,12 +86,14 @@ def render(db: Database, run_id: str) -> None:
 
     results_data = []
     for e in category_evals:
-        results_data.append({
-            "Provider": f"{e.get('provider', 'unknown')}:{e.get('search_mode', 'default')}",
-            "Query": e.get("query_text", "")[:80] + "...",
-            "Score": e.get("weighted_score", 0),
-            "Failures": ", ".join(e.get("failure_modes", [])[:3]),
-        })
+        results_data.append(
+            {
+                "Provider": system_key_of(e),
+                "Query": e.get("query_text", "")[:80] + "...",
+                "Score": e.get("weighted_score", 0),
+                "Failures": ", ".join(e.get("failure_modes", [])[:3]),
+            }
+        )
 
     if results_data:
         df = pd.DataFrame(results_data)
@@ -109,10 +110,12 @@ def render(db: Database, run_id: str) -> None:
             failure_counts[mode] = failure_counts.get(mode, 0) + 1
 
     if failure_counts:
-        failure_df = pd.DataFrame([
-            {"Failure Mode": k, "Count": v}
-            for k, v in sorted(failure_counts.items(), key=lambda x: x[1], reverse=True)
-        ])
+        failure_df = pd.DataFrame(
+            [
+                {"Failure Mode": k, "Count": v}
+                for k, v in sorted(failure_counts.items(), key=lambda x: x[1], reverse=True)
+            ]
+        )
         st.dataframe(failure_df, use_container_width=True)
     else:
         st.info("No failures recorded for this category.")

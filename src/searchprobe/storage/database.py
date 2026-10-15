@@ -2,13 +2,18 @@
 
 import json
 import sqlite3
+from collections.abc import Generator
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Generator
+from typing import Any
 from uuid import uuid4
 
+from searchprobe.core.systems import system_key
 from searchprobe.providers.models import SearchResponse
+
+# Evaluation statuses that reflect infrastructure, not retrieval quality.
+INFRA_ERROR_STATUSES = frozenset({"search_error", "judge_error"})
 
 
 class Database:
@@ -73,6 +78,9 @@ class Database:
         run_id TEXT REFERENCES runs(id),
         query_id TEXT REFERENCES queries(id),
         provider TEXT NOT NULL,
+        search_mode TEXT,
+        status TEXT DEFAULT 'ok',  -- ok | no_results | search_error | judge_error
+        prompt_version TEXT,
         result_index INTEGER,  -- which result in the list
         scores TEXT NOT NULL,  -- JSON {dimension: score}
         weighted_score REAL,
@@ -171,6 +179,40 @@ class Database:
     CREATE INDEX IF NOT EXISTS idx_evolution_timestamp ON evolution_results(timestamp);
     """
 
+    # Columns added after the first release; applied to existing databases on open.
+    MIGRATIONS: dict[str, dict[str, str]] = {
+        "geometry_results": {"run_id": "TEXT REFERENCES runs(id)"},
+        "runs": {"status": "TEXT"},
+        "search_results": {"metadata": "TEXT"},
+        "queries": {"spec": "TEXT"},
+        "evaluations": {
+            "search_mode": "TEXT",
+            "status": "TEXT DEFAULT 'ok'",
+            "prompt_version": "TEXT",
+        },
+    }
+
+    # Run once, right after a migration adds the column, to fill it for legacy rows.
+    BACKFILLS: dict[tuple[str, str], str] = {
+        # Legacy evaluations had no mode; take it from the search result when the
+        # (run, query, provider) has exactly one, otherwise it stays unknown (NULL).
+        ("evaluations", "search_mode"): """
+            UPDATE evaluations SET search_mode = (
+                SELECT MIN(sr.search_mode) FROM search_results sr
+                WHERE sr.run_id = evaluations.run_id AND sr.query_id = evaluations.query_id
+                  AND sr.provider = evaluations.provider
+                HAVING COUNT(*) = 1)
+            WHERE search_mode IS NULL""",
+        # Legacy infrastructure failures were recorded only as failure modes.
+        ("evaluations", "status"): """
+            UPDATE evaluations SET status = CASE
+                WHEN failure_mode LIKE '%"search_failed"%' THEN 'search_error'
+                WHEN failure_mode LIKE '%"no_results"%' THEN 'no_results'
+                WHEN failure_mode LIKE '%"evaluation_failed"%'
+                  OR failure_mode LIKE '%"parse_error"%' THEN 'judge_error'
+                ELSE 'ok' END""",
+    }
+
     def __init__(self, db_path: str | Path = "searchprobe.db") -> None:
         """Initialize database connection."""
         self.db_path = Path(db_path)
@@ -181,10 +223,14 @@ class Database:
         with self._get_connection() as conn:
             conn.execute("PRAGMA journal_mode=WAL")
             conn.executescript(self.SCHEMA)
-            # Migrate: add run_id to geometry_results if missing
-            cols = [row[1] for row in conn.execute("PRAGMA table_info(geometry_results)").fetchall()]
-            if "run_id" not in cols:
-                conn.execute("ALTER TABLE geometry_results ADD COLUMN run_id TEXT REFERENCES runs(id)")
+            for table, columns in self.MIGRATIONS.items():
+                existing = {row[1] for row in conn.execute(f"PRAGMA table_info({table})")}
+                for column, decl in columns.items():
+                    if column not in existing:
+                        conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {decl}")
+                        backfill = self.BACKFILLS.get((table, column))
+                        if backfill:
+                            conn.execute(backfill)
             conn.commit()
 
     @contextmanager
@@ -232,14 +278,20 @@ class Database:
         tier: str | None = None,
         ground_truth: dict[str, Any] | None = None,
         metadata: dict[str, Any] | None = None,
+        spec: dict[str, Any] | None = None,
     ) -> str:
-        """Add a query to a query set."""
+        """Add a query to a query set.
+
+        ``spec`` holds a full v2 ``TestCase`` (typed constraints, twins, answer
+        sets); when present it is the authoritative definition of the case.
+        """
         query_id = str(uuid4())
         with self._get_connection() as conn:
             conn.execute(
                 """INSERT INTO queries
-                   (id, query_set_id, text, category, difficulty, tier, ground_truth, metadata)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                   (id, query_set_id, text, category, difficulty, tier, ground_truth, metadata,
+                    spec)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     query_id,
                     query_set_id,
@@ -249,6 +301,7 @@ class Database:
                     tier,
                     json.dumps(ground_truth or {}),
                     json.dumps(metadata or {}),
+                    json.dumps(spec) if spec else None,
                 ),
             )
             # Update query count
@@ -258,6 +311,27 @@ class Database:
             )
             conn.commit()
         return query_id
+
+    def get_query(self, query_id: str) -> dict[str, Any] | None:
+        """Get a single query row by id."""
+        with self._get_connection() as conn:
+            row = conn.execute("SELECT * FROM queries WHERE id = ?", (query_id,)).fetchone()
+        return dict(row) if row else None
+
+    def add_cases(self, cases: list[Any], name: str | None = None) -> str:
+        """Create a query set from v2 ``TestCase`` objects; returns the query set id."""
+        query_set_id = self.create_query_set(name=name, config={"schema_version": 2})
+        for case in cases:
+            self.add_query(
+                query_set_id=query_set_id,
+                text=case.text,
+                category=case.category.value,
+                difficulty=case.difficulty,
+                tier=case.provenance.generator,
+                metadata={"case_id": case.id},
+                spec=case.model_dump(mode="json"),
+            )
+        return query_set_id
 
     def get_queries(
         self,
@@ -299,30 +373,54 @@ class Database:
             conn.execute(
                 """INSERT INTO runs (id, name, query_set_id, started_at, config)
                    VALUES (?, ?, ?, ?, ?)""",
-                (run_id, name, query_set_id, datetime.now(timezone.utc).isoformat(), json.dumps(config or {})),
+                (
+                    run_id,
+                    name,
+                    query_set_id,
+                    datetime.now(UTC).isoformat(),
+                    json.dumps(config or {}),
+                ),
             )
             conn.commit()
         return run_id
 
     def complete_run(
-        self, run_id: str, cost_total: float, cost_breakdown: dict[str, float]
+        self,
+        run_id: str,
+        cost_total: float,
+        cost_breakdown: dict[str, float],
+        status: str = "completed",
     ) -> None:
-        """Mark a run as completed with cost information."""
+        """Mark a run as finished with cost information and a status."""
         with self._get_connection() as conn:
             conn.execute(
                 """UPDATE runs
-                   SET completed_at = ?, cost_total = ?, cost_breakdown = ?
+                   SET completed_at = ?, cost_total = ?, cost_breakdown = ?, status = ?
                    WHERE id = ?""",
-                (datetime.now(timezone.utc).isoformat(), cost_total, json.dumps(cost_breakdown), run_id),
+                (
+                    datetime.now(UTC).isoformat(),
+                    cost_total,
+                    json.dumps(cost_breakdown),
+                    status,
+                    run_id,
+                ),
             )
             conn.commit()
+
+    def get_run(self, run_id: str) -> dict[str, Any] | None:
+        """A run row with its config (including the manifest) decoded."""
+        with self._get_connection() as conn:
+            row = conn.execute("SELECT * FROM runs WHERE id = ?", (run_id,)).fetchone()
+        if row is None:
+            return None
+        run = dict(row)
+        run["config"] = json.loads(run["config"]) if run.get("config") else {}
+        return run
 
     def get_latest_run_id(self) -> str | None:
         """Get the most recent run ID."""
         with self._get_connection() as conn:
-            row = conn.execute(
-                "SELECT id FROM runs ORDER BY started_at DESC LIMIT 1"
-            ).fetchone()
+            row = conn.execute("SELECT id FROM runs ORDER BY started_at DESC LIMIT 1").fetchone()
             return row["id"] if row else None
 
     # Search Results Operations
@@ -333,8 +431,8 @@ class Database:
             conn.execute(
                 """INSERT INTO search_results
                    (id, run_id, query_id, provider, search_mode, results,
-                    latency_ms, cost_usd, error, timestamp)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    latency_ms, cost_usd, error, timestamp, metadata)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     result_id,
                     run_id,
@@ -346,14 +444,13 @@ class Database:
                     response.cost_usd,
                     response.error,
                     response.timestamp.isoformat(),
+                    json.dumps(response.metadata, default=str),
                 ),
             )
             conn.commit()
         return result_id
 
-    def get_search_results(
-        self, run_id: str, provider: str | None = None
-    ) -> list[dict[str, Any]]:
+    def get_search_results(self, run_id: str, provider: str | None = None) -> list[dict[str, Any]]:
         """Get search results for a run."""
         query = "SELECT * FROM search_results WHERE run_id = ?"
         params: list[Any] = [run_id]
@@ -415,6 +512,7 @@ class Database:
                     WHERE e.run_id = sr.run_id
                     AND e.query_id = sr.query_id
                     AND e.provider = sr.provider
+                    AND COALESCE(e.search_mode, '') = COALESCE(sr.search_mode, '')
                 )
             """
 
@@ -449,21 +547,25 @@ class Database:
         with self._get_connection() as conn:
             conn.execute(
                 """INSERT INTO evaluations
-                   (id, run_id, query_id, provider, result_index, scores,
-                    weighted_score, reasoning, failure_mode, judge_model, timestamp)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                   (id, run_id, query_id, provider, search_mode, status, prompt_version,
+                    result_index, scores, weighted_score, reasoning, failure_mode,
+                    judge_model, timestamp)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     eval_id,
                     run_id,
                     evaluation.get("query_id"),
                     evaluation.get("provider"),
+                    evaluation.get("search_mode"),
+                    evaluation.get("status", "ok"),
+                    evaluation.get("prompt_version"),
                     evaluation.get("best_result_index"),
                     json.dumps(evaluation.get("dimension_scores", {})),
                     evaluation.get("weighted_score", 0.0),
                     evaluation.get("overall_assessment", ""),
                     json.dumps(evaluation.get("failure_modes", [])),
                     evaluation.get("judge_model"),
-                    evaluation.get("evaluated_at", datetime.now(timezone.utc).isoformat()),
+                    evaluation.get("evaluated_at", datetime.now(UTC).isoformat()),
                 ),
             )
             conn.commit()
@@ -513,6 +615,7 @@ class Database:
                     result["scores"] = json.loads(result["scores"])
                 if result.get("failure_mode"):
                     result["failure_modes"] = json.loads(result["failure_mode"])
+                result["system"] = system_key(result.get("provider"), result.get("search_mode"))
                 results.append(result)
             return results
 
@@ -549,8 +652,12 @@ class Database:
         model_name: str | None = None,
         category: str | None = None,
         run_id: str | None = None,
+        latest_only: bool = False,
     ) -> list[dict[str, Any]]:
-        """Get geometry analysis results."""
+        """Get geometry analysis results, newest first.
+
+        With ``latest_only``, keep only the newest row per (model, category).
+        """
         query = "SELECT * FROM geometry_results WHERE 1=1"
         params: list[Any] = []
         if run_id:
@@ -571,6 +678,15 @@ class Database:
                 if r.get("pair_details"):
                     r["pair_details"] = json.loads(r["pair_details"])
                 results.append(r)
+            if latest_only:
+                seen: set[tuple[str, str]] = set()
+                deduped = []
+                for r in results:
+                    key = (r["model_name"], r["category"])
+                    if key not in seen:
+                        seen.add(key)
+                        deduped.append(r)
+                results = deduped
             return results
 
     # Perturbation Operations
@@ -764,18 +880,25 @@ class Database:
         """Compute and store aggregate scores for a run.
 
         Replaces any existing aggregates for this run, then computes
-        per-(provider, category, dimension) statistics from evaluations.
+        per-(system, category, dimension) statistics from evaluations.
+        The ``provider`` column holds the system key (``provider:mode``).
+
+        Infrastructure errors (``search_error``/``judge_error``) are excluded
+        from quality statistics and reported as ``failure_rate`` instead;
+        ``no_results`` is a genuine retrieval failure and counts as 0.
 
         Returns:
             Number of aggregate rows inserted.
         """
+        from collections import defaultdict
+
+        from searchprobe.evaluation.statistics import calculate_confidence_interval
+
         with self._get_connection() as conn:
             conn.execute("DELETE FROM aggregate_scores WHERE run_id = ?", (run_id,))
-
-            # Fetch evaluations with category info
             rows = conn.execute(
-                """SELECT e.provider, q.category, e.scores, e.weighted_score,
-                          e.failure_mode
+                """SELECT e.provider, e.search_mode, e.status, e.query_id, q.category,
+                          e.scores, e.weighted_score
                    FROM evaluations e
                    JOIN queries q ON e.query_id = q.id
                    WHERE e.run_id = ?""",
@@ -786,58 +909,66 @@ class Database:
                 conn.commit()
                 return 0
 
-            # Build aggregation: (provider, category, dimension) -> list of scores
-            from collections import defaultdict
-            import math
-
             buckets: dict[tuple[str, str, str], list[float]] = defaultdict(list)
-            failure_counts: dict[tuple[str, str], tuple[int, int]] = defaultdict(lambda: (0, 0))
+            totals: dict[tuple[str, str], int] = defaultdict(int)
+            errors: dict[tuple[str, str], int] = defaultdict(int)
 
             for row in rows:
-                provider = row["provider"]
+                system = system_key(row["provider"], row["search_mode"])
                 category = row["category"]
-                scores_json = row["scores"]
-                failure_json = row["failure_mode"]
+                status = row["status"] or "ok"
+                totals[(system, category)] += 1
+                if status in INFRA_ERROR_STATUSES:
+                    errors[(system, category)] += 1
+                    continue
 
-                # Track overall weighted score under dimension="overall"
-                buckets[(provider, category, "overall")].append(
-                    row["weighted_score"] or 0.0
-                )
+                buckets[(system, category, "overall")].append(row["weighted_score"] or 0.0)
+                if row["scores"]:
+                    for dim_name, dim_data in json.loads(row["scores"]).items():
+                        score = (
+                            dim_data.get("score", 0.0) if isinstance(dim_data, dict) else dim_data
+                        )
+                        buckets[(system, category, dim_name)].append(float(score))
 
-                # Track per-dimension scores
-                if scores_json:
-                    dim_scores = json.loads(scores_json)
-                    for dim_name, dim_data in dim_scores.items():
-                        score = dim_data.get("score", 0.0) if isinstance(dim_data, dict) else dim_data
-                        buckets[(provider, category, dim_name)].append(float(score))
-
-                # Track failures
-                key = (provider, category)
-                total, fails = failure_counts[key]
-                has_failure = bool(failure_json and failure_json != "[]")
-                failure_counts[key] = (total + 1, fails + (1 if has_failure else 0))
-
-            # Insert aggregated rows
             count = 0
-            for (provider, category, dimension), scores in buckets.items():
+            for (system, category, dimension), scores in buckets.items():
+                ci = calculate_confidence_interval(scores)
                 n = len(scores)
-                mean = sum(scores) / n
-                variance = sum((s - mean) ** 2 for s in scores) / n if n > 1 else 0.0
-                std = math.sqrt(variance)
-                se = std / math.sqrt(n) if n > 1 else 0.0
-                ci_lower = mean - 1.96 * se
-                ci_upper = mean + 1.96 * se
-
-                total, fails = failure_counts.get((provider, category), (0, 0))
-                failure_rate = fails / total if total > 0 else 0.0
-
+                mean = ci.mean
+                std = (sum((x - mean) ** 2 for x in scores) / (n - 1)) ** 0.5 if n > 1 else 0.0
+                total = totals[(system, category)]
+                failure_rate = errors[(system, category)] / total if total else 0.0
                 conn.execute(
                     """INSERT INTO aggregate_scores
                        (run_id, provider, category, dimension, mean_score,
                         std_score, ci_lower, ci_upper, n_queries, failure_rate)
                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                    (run_id, provider, category, dimension, mean,
-                     std, ci_lower, ci_upper, n, failure_rate),
+                    (
+                        run_id,
+                        system,
+                        category,
+                        dimension,
+                        mean,
+                        std,
+                        ci.lower,
+                        ci.upper,
+                        n,
+                        failure_rate,
+                    ),
+                )
+                count += 1
+
+            # Cells where every evaluation was an infrastructure error still get an
+            # "overall" row (no scores, failure_rate 1.0) instead of disappearing.
+            for (system, category), total in totals.items():
+                if (system, category, "overall") in buckets:
+                    continue
+                conn.execute(
+                    """INSERT INTO aggregate_scores
+                       (run_id, provider, category, dimension, mean_score,
+                        std_score, ci_lower, ci_upper, n_queries, failure_rate)
+                       VALUES (?, ?, ?, 'overall', NULL, NULL, NULL, NULL, 0, ?)""",
+                    (run_id, system, category, errors[(system, category)] / total),
                 )
                 count += 1
 

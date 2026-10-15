@@ -1,8 +1,5 @@
 """Generate benchmark reports command."""
 
-from pathlib import Path
-from typing import Optional
-
 import typer
 from rich.console import Console
 
@@ -16,6 +13,7 @@ app = typer.Typer(help="Generate benchmark reports.")
 
 @app.callback(invoke_without_command=True)
 def report(
+    ctx: typer.Context,
     run_id: str = typer.Option(
         "latest",
         "--run-id",
@@ -41,6 +39,8 @@ def report(
     ),
 ) -> None:
     """Generate benchmark reports with charts and analysis."""
+    if ctx.invoked_subcommand is not None:
+        return  # e.g. `searchprobe report list-runs` must not generate a report first
     settings = get_settings()
     db = Database(settings.database_path)
 
@@ -87,6 +87,7 @@ def report(
         # Open in browser if requested
         if open_browser and "html" in output_files:
             import webbrowser
+
             html_path = output_files["html"]
             url = f"file://{html_path.absolute()}"
             console.print(f"\n[blue]Opening in browser: {url}[/blue]")

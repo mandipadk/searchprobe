@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 
 from aris.core.models import ScoredDocument
+from aris.core.numbers import to_float
 from aris.index.structured_store import StructuredStore
 from aris.que.models import ComparisonOp, Constraint, ConstraintType
 
@@ -57,10 +58,7 @@ class StructuredRetriever:
             end = str(constraint.value)
 
         docs = self._store.query_by_date_range(start=start, end=end, limit=limit)
-        return [
-            ScoredDocument(document=doc, retrieval_score=0.8, final_score=0.8)
-            for doc in docs
-        ]
+        return [ScoredDocument(document=doc, retrieval_score=0.8, final_score=0.8) for doc in docs]
 
     def _retrieve_numeric(self, constraint: Constraint, limit: int) -> list[ScoredDocument]:
         if not constraint.field:
@@ -74,10 +72,9 @@ class StructuredRetriever:
             ComparisonOp.LTE: "lte",
         }
         op = op_map.get(constraint.operator, "gte")
-        value = float(constraint.value) if constraint.value is not None else 0
+        value = to_float(constraint.value)
+        if value is None:
+            return []  # unparseable LLM value: no structured retrieval, never a crash
 
         docs = self._store.query_by_numeric(constraint.field, op, value, limit=limit)
-        return [
-            ScoredDocument(document=doc, retrieval_score=0.9, final_score=0.9)
-            for doc in docs
-        ]
+        return [ScoredDocument(document=doc, retrieval_score=0.9, final_score=0.9) for doc in docs]

@@ -1,7 +1,6 @@
 """Evaluation dimensions for scoring search results."""
 
 from enum import Enum
-from typing import Any
 
 from searchprobe.queries.taxonomy import AdversarialCategory
 

@@ -33,9 +33,7 @@ class ValidationAdapter:
         from searchprobe.providers.models import SearchRequest
         from searchprobe.validation.cross_encoder import CrossEncoderValidator
 
-        validator = CrossEncoderValidator(
-            model_name=self.model_name, device=self.device
-        )
+        validator = CrossEncoderValidator(model_name=self.model_name, device=self.device)
 
         # Build queries from context or taxonomy
         queries: list[dict[str, Any]] = []
@@ -43,6 +41,7 @@ class ValidationAdapter:
             queries = context.metadata["queries"]
         else:
             from searchprobe.queries.taxonomy import CATEGORY_METADATA, AdversarialCategory
+
             for cat in AdversarialCategory:
                 if categories and cat.value not in categories:
                     continue
@@ -57,9 +56,7 @@ class ValidationAdapter:
 
         for q in queries:
             # Search
-            request = SearchRequest(
-                query=q["text"], num_results=10, include_content=True
-            )
+            request = SearchRequest(query=q["text"], num_results=10, include_content=True)
             response = await self.provider.search(request)
             if not response.success:
                 continue
@@ -81,31 +78,36 @@ class ValidationAdapter:
             improvements_by_cat.setdefault(cat, []).append(result.ndcg_improvement)
             provider_improvements.append(result.ndcg_improvement)
 
-            details.append({
-                "query": q["text"],
-                "category": cat,
-                "provider": response.provider,
-                "original_ndcg": result.original_ndcg,
-                "reranked_ndcg": result.reranked_ndcg,
-                "ndcg_improvement": result.ndcg_improvement,
-                "kendall_tau": result.kendall_tau,
-            })
+            details.append(
+                {
+                    "query": q["text"],
+                    "category": cat,
+                    "provider": response.provider,
+                    "original_ndcg": result.original_ndcg,
+                    "reranked_ndcg": result.reranked_ndcg,
+                    "ndcg_improvement": result.ndcg_improvement,
+                    "kendall_tau": result.kendall_tau,
+                }
+            )
 
             if result.ndcg_improvement > 0.1:
-                signals.append(Signal(
-                    type=SignalType.EMBEDDING_GAP_FOUND,
-                    source=self.name,
-                    category=cat,
-                    data={
-                        "ndcg_improvement": result.ndcg_improvement,
-                        "query": q["text"],
-                        "provider": response.provider,
-                    },
-                ))
+                signals.append(
+                    Signal(
+                        type=SignalType.EMBEDDING_GAP_FOUND,
+                        source=self.name,
+                        category=cat,
+                        data={
+                            "ndcg_improvement": result.ndcg_improvement,
+                            "query": q["text"],
+                            "provider": response.provider,
+                        },
+                    )
+                )
 
         mean_improvement = (
             sum(provider_improvements) / len(provider_improvements)
-            if provider_improvements else 0.0
+            if provider_improvements
+            else 0.0
         )
         max_improvement = max(provider_improvements) if provider_improvements else 0.0
 

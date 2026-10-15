@@ -1,6 +1,11 @@
 """Prompt templates for LLM-as-judge evaluation."""
 
+from typing import Any
+
 from searchprobe.queries.taxonomy import AdversarialCategory
+
+# Bump whenever prompt text or output schema changes; stored with every judgment.
+PROMPT_VERSION = "list-judge-v2"
 
 # Base system prompt for the judge
 JUDGE_SYSTEM_PROMPT = """You are an expert search quality evaluator. Your task is to assess how well search results satisfy a given query.
@@ -22,7 +27,7 @@ Be strict but fair. Consider:
 - 0.7-0.8: Good, most results are relevant with minor issues
 - 0.9-1.0: Excellent, results fully satisfy the query requirements
 
-Always output valid JSON matching the required schema."""
+Respond only with the JSON object described by the output schema."""
 
 
 # Category-specific evaluation guidance
@@ -152,62 +157,62 @@ Also identify:
 - best_result_index: Index (1-based) of the best result, or null if all fail
 - overall_assessment: One sentence summary
 
-Respond with valid JSON in this exact format:
-{{
-  "scores": {{
-    "dimension_name": {{
-      "score": 0.75,
-      "justification": "Brief explanation"
-    }}
-  }},
-  "failure_modes": ["failure1", "failure2"],
-  "best_result_index": 1,
-  "overall_assessment": "One sentence summary"
-}}"""
+failure_modes must be chosen from the allowed values in the output schema.
+Scores are in [0, 1]. best_result_index is 1-based."""
 
-    # Add ground truth if available (for calibration)
-    if ground_truth:
+    gt_text = format_ground_truth(ground_truth)
+    if gt_text:
         prompt += f"""
 
-## Reference Information (for your calibration)
-Expected relevant results should match: {ground_truth.get('should_match', 'N/A')}
-Expected irrelevant results would match: {ground_truth.get('should_not_match', 'N/A')}
-Expected entity disambiguation: {ground_truth.get('expected_entity', 'N/A')}"""
+## Verification Criteria (authoritative; use them when scoring)
+{gt_text}"""
 
     return prompt
 
 
-def build_batch_prompt(
-    evaluations: list[dict],
-) -> str:
-    """Build a prompt for batch evaluation of multiple queries.
+def format_ground_truth(ground_truth: dict[str, Any] | None) -> str:
+    """Render a stored ``GroundTruth`` dict as judge-readable criteria.
 
-    Args:
-        evaluations: List of dicts with query, category, results, dimensions
-
-    Returns:
-        Formatted prompt for batch evaluation
+    Only fields that exist on ``searchprobe.queries.models.GroundTruth`` are
+    read; anything else is ignored rather than rendered as "N/A".
     """
-    prompt = """Evaluate multiple search result sets. For each query, provide scores.
-
-"""
-    for i, eval_item in enumerate(evaluations, 1):
-        prompt += f"\n{'='*50}\n"
-        prompt += f"## Query Set {i}\n"
-        prompt += build_evaluation_prompt(
-            query=eval_item["query"],
-            category=eval_item["category"],
-            results=eval_item["results"],
-            dimensions=eval_item["dimensions"],
+    if not ground_truth:
+        return ""
+    gt = ground_truth
+    lines: list[str] = []
+    if gt.get("must_contain_keywords"):
+        lines.append(
+            "- Relevant results should be about: " + ", ".join(gt["must_contain_keywords"])
         )
-
-    prompt += """
-
-Respond with a JSON array, one evaluation object per query set:
-[
-  { evaluation for query 1 },
-  { evaluation for query 2 },
-  ...
-]"""
-
-    return prompt
+    if gt.get("must_not_contain_keywords"):
+        lines.append(
+            "- Results that ARE (not merely mention) any of these violate the query: "
+            + ", ".join(gt["must_not_contain_keywords"])
+        )
+    if gt.get("expected_entity"):
+        lines.append(f"- The intended entity is: {gt['expected_entity']}")
+    if gt.get("wrong_entities"):
+        lines.append("- Results about these entities are wrong: " + ", ".join(gt["wrong_entities"]))
+    if gt.get("numeric_exact") is not None:
+        field = gt.get("numeric_field") or "value"
+        lines.append(f"- Required {field}: exactly {gt['numeric_exact']}")
+    elif gt.get("numeric_min") is not None or gt.get("numeric_max") is not None:
+        field = gt.get("numeric_field") or "value"
+        lo = gt.get("numeric_min", "-inf")
+        hi = gt.get("numeric_max", "+inf")
+        lines.append(f"- Required {field} range: [{lo}, {hi}]")
+    if gt.get("date_min") or gt.get("date_max"):
+        lines.append(
+            f"- Required date range: [{gt.get('date_min') or '-inf'}, {gt.get('date_max') or '+inf'}]"
+        )
+    if gt.get("expected_language"):
+        lines.append(f"- Results must be in language: {gt['expected_language']}")
+    if gt.get("expected_types"):
+        lines.append("- Results must be of type: " + ", ".join(gt["expected_types"]))
+    if gt.get("manual_judgment"):
+        lines.append(f"- Verification guidance: {gt['manual_judgment']}")
+    if gt.get("reference_urls"):
+        lines.append("- Known-good URLs: " + ", ".join(gt["reference_urls"]))
+    if gt.get("notes"):
+        lines.append(f"- Notes: {gt['notes']}")
+    return "\n".join(lines)

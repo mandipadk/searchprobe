@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import re
-
 from aris.que.models import EntityReference
 
 # Known ambiguous entities with disambiguation hints
@@ -30,7 +28,10 @@ _AMBIGUOUS_ENTITIES: dict[str, list[dict[str, str]]] = {
     ],
     "michael jordan": [
         {"entity_type": "person", "disambiguation": "Michael Jordan basketball player"},
-        {"entity_type": "person", "disambiguation": "Michael I. Jordan machine learning professor at UC Berkeley"},
+        {
+            "entity_type": "person",
+            "disambiguation": "Michael I. Jordan machine learning professor at UC Berkeley",
+        },
     ],
     "mercury": [
         {"entity_type": "planet", "disambiguation": "Mercury planet in the solar system"},
@@ -41,7 +42,16 @@ _AMBIGUOUS_ENTITIES: dict[str, list[dict[str, str]]] = {
 
 # Context words that help disambiguate
 _CONTEXT_HINTS: dict[str, list[str]] = {
-    "language": ["programming", "code", "library", "framework", "developer", "software", "IDE", "compiler"],
+    "language": [
+        "programming",
+        "code",
+        "library",
+        "framework",
+        "developer",
+        "software",
+        "IDE",
+        "compiler",
+    ],
     "company": ["company", "corporation", "inc", "startup", "founded", "CEO", "stock", "revenue"],
     "person": ["born", "died", "player", "professor", "author", "singer", "actor"],
     "place": ["island", "city", "country", "state", "province", "located"],
@@ -72,10 +82,12 @@ def extract_entities(query: str) -> list[EntityReference]:
                     best_score = score
                     best_variant = variant
 
-            entities.append(EntityReference(
-                text=entity_name,
-                entity_type=best_variant["entity_type"],
-                disambiguation=best_variant["disambiguation"],
-            ))
+            entities.append(
+                EntityReference(
+                    text=entity_name,
+                    entity_type=best_variant["entity_type"],
+                    disambiguation=best_variant["disambiguation"],
+                )
+            )
 
     return entities

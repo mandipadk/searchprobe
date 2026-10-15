@@ -20,9 +20,9 @@ class ArisConfig(BaseSettings):
 
     # LLM
     anthropic_api_key: str = Field(default="", description="Anthropic API key for Claude")
-    parser_model: str = Field(default="claude-haiku-4-5-20251001", description="Model for QUE parsing")
+    parser_model: str = Field(default="claude-haiku-5-5", description="Model for QUE parsing")
     verifier_model: str = Field(
-        default="claude-haiku-4-5-20251001", description="Model for constraint verification fallback"
+        default="claude-haiku-5-5", description="Model for constraint verification fallback"
     )
 
     # Data source API keys
@@ -41,7 +41,9 @@ class ArisConfig(BaseSettings):
     max_candidates: int = Field(default=100, ge=10, le=500)
 
     # Agent
-    max_iterations: int = Field(default=3, ge=1, le=5, description="Max search refinement iterations")
+    max_iterations: int = Field(
+        default=3, ge=1, le=5, description="Max search refinement iterations"
+    )
 
     # Server
     host: str = Field(default="0.0.0.0")

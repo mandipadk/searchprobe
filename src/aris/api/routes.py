@@ -32,6 +32,7 @@ def set_dependencies(search_agent, sources, index_manager, config):
 @router.get("/health", response_model=HealthResponse)
 async def health():
     from aris import __version__
+
     return HealthResponse(
         status="ok",
         version=__version__,
@@ -78,11 +79,24 @@ async def search(request: SearchRequest):
 
 @router.post("/index")
 async def index_urls(request: IndexRequest):
+    import os
+
+    # Fetching arbitrary URLs on behalf of unauthenticated callers is an SSRF risk:
+    # the route is disabled unless explicitly enabled, and private hosts are refused.
+    if os.environ.get("ARIS_ENABLE_INDEX_API") != "1":
+        raise HTTPException(status_code=403, detail="Index API disabled (ARIS_ENABLE_INDEX_API=1)")
     if _index_manager is None:
         raise HTTPException(status_code=503, detail="Index manager not initialized")
+    import asyncio
 
-    from aris.sources.web import WebSource
-    web = WebSource()
+    from aris.sources.web import WebSource, is_public_http_url
+
+    checks = await asyncio.gather(*[asyncio.to_thread(is_public_http_url, u) for u in request.urls])
+    blocked = [u for u, ok in zip(request.urls, checks, strict=True) if not ok]
+    if blocked:
+        raise HTTPException(status_code=400, detail=f"Refusing non-public URLs: {blocked}")
+
+    web = WebSource(public_only=True)  # every hop resolved, checked and pinned
     try:
         documents = await web.fetch_urls(request.urls)
         _index_manager.add_documents(documents)

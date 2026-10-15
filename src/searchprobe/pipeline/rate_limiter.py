@@ -37,7 +37,12 @@ class TokenBucketRateLimiter:
 
         Args:
             tokens: Number of tokens to acquire (default 1)
+
+        Raises:
+            ValueError: If more tokens are requested than the bucket can ever hold.
         """
+        if tokens > self.burst:
+            raise ValueError(f"Cannot acquire {tokens} tokens from a bucket of size {self.burst}")
         while True:
             async with self._lock:
                 self._refill()
@@ -72,8 +77,9 @@ class TokenBucketRateLimiter:
 
     @property
     def available_tokens(self) -> float:
-        """Get current number of available tokens (snapshot, no side effects)."""
-        return self.tokens
+        """Current available tokens, including refill since the last acquire."""
+        elapsed = time.monotonic() - self.last_refill
+        return min(float(self.burst), self.tokens + elapsed * self.rate)
 
 
 class RateLimiterPool:

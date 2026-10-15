@@ -1,0 +1,9 @@
+# Does the Aris verify-and-rerank layer reduce violations over its own base system?
+name = "aris-ablation"
+cases = "data/cases/v1"
+categories = ["negation", "boolean_logic", "numeric_precision", "entity_disambiguation"]
+limit = 20
+systems = ["exa:neural", "aris+exa:neural"]
+budget_search = 15.0   # aris+exa fans out and verifies ~20 candidates per query
+budget_judge = 10.0
+metamorphic = false

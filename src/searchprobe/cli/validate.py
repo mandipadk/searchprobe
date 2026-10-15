@@ -1,10 +1,8 @@
 """CLI command for cross-encoder validation."""
 
-from typing import Optional
-
 import typer
 from rich.console import Console
-from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn
+from rich.progress import BarColumn, Progress, SpinnerColumn, TaskProgressColumn, TextColumn
 from rich.table import Table
 
 from searchprobe.config import get_settings
@@ -28,13 +26,13 @@ def validate(
         "-e",
         help="Cross-encoder model name",
     ),
-    max_results: Optional[int] = typer.Option(
+    max_results: int | None = typer.Option(
         None,
         "--max-results",
         "-n",
         help="Maximum number of results to validate",
     ),
-    categories: Optional[str] = typer.Option(
+    categories: str | None = typer.Option(
         None,
         "--categories",
         "-c",
@@ -120,17 +118,19 @@ def validate(
             )
 
             # Store in database
-            db.add_validation_result({
-                "run_id": actual_run_id,
-                "query_id": result_item["query_id"],
-                "provider": result_item["provider"],
-                "cross_encoder_model": cross_encoder,
-                "original_ndcg": validation.original_ndcg,
-                "reranked_ndcg": validation.reranked_ndcg,
-                "ndcg_improvement": validation.ndcg_improvement,
-                "kendall_tau": validation.kendall_tau,
-                "scores": [s.to_dict() for s in validation.scores],
-            })
+            db.add_validation_result(
+                {
+                    "run_id": actual_run_id,
+                    "query_id": result_item["query_id"],
+                    "provider": result_item["provider"],
+                    "cross_encoder_model": cross_encoder,
+                    "original_ndcg": validation.original_ndcg,
+                    "reranked_ndcg": validation.reranked_ndcg,
+                    "ndcg_improvement": validation.ndcg_improvement,
+                    "kendall_tau": validation.kendall_tau,
+                    "scores": [s.to_dict() for s in validation.scores],
+                }
+            )
 
             all_validations.append(validation)
             progress.update(task, completed=i + 1)
@@ -151,7 +151,9 @@ def _display_summary(validations: list) -> None:
     taus = [v.kendall_tau for v in validations]
 
     console.print("\n[bold]Embedding Gap Summary[/bold]")
-    console.print(f"  Mean NDCG improvement: {np.mean(improvements):.3f} ({np.mean(improvements):.1%})")
+    console.print(
+        f"  Mean NDCG improvement: {np.mean(improvements):.3f} ({np.mean(improvements):.1%})"
+    )
     console.print(f"  Median NDCG improvement: {np.median(improvements):.3f}")
     console.print(f"  Mean Kendall's tau: {np.mean(taus):.3f}")
 
@@ -169,7 +171,9 @@ def _display_summary(validations: list) -> None:
         category_data[v.category]["improvements"].append(v.ndcg_improvement)
         category_data[v.category]["taus"].append(v.kendall_tau)
 
-    for cat, data in sorted(category_data.items(), key=lambda x: np.mean(x[1]["improvements"]), reverse=True):
+    for cat, data in sorted(
+        category_data.items(), key=lambda x: np.mean(x[1]["improvements"]), reverse=True
+    ):
         mean_imp = np.mean(data["improvements"])
         mean_tau = np.mean(data["taus"])
         color = "red" if mean_imp > 0.2 else "yellow" if mean_imp > 0.1 else "green"

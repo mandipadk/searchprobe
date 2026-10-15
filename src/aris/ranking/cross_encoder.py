@@ -22,21 +22,19 @@ class CrossEncoderReranker:
             return
         try:
             from sentence_transformers import CrossEncoder
+
             self._model = CrossEncoder(self._model_name)
         except ImportError:
             logger.warning("sentence-transformers not installed, cross-encoder reranking disabled")
 
-    async def rerank(
-        self, query: str, candidates: list[ScoredDocument]
-    ) -> list[ScoredDocument]:
+    async def rerank(self, query: str, candidates: list[ScoredDocument]) -> list[ScoredDocument]:
         """Score each (query, document) pair with the cross-encoder."""
         self._ensure_model()
         if self._model is None or not candidates:
             return candidates
 
         pairs = [
-            (query, (doc.document.content or doc.document.snippet)[:512])
-            for doc in candidates
+            (query, (doc.document.content or doc.document.snippet)[:512]) for doc in candidates
         ]
 
         try:

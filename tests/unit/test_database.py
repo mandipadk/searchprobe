@@ -136,3 +136,56 @@ def test_materialize_aggregate_scores_idempotent(temp_db):
     aggs = temp_db.get_aggregate_scores(run_id)
     # Should not have duplicates
     assert len(aggs) == count1
+
+
+def test_error_only_cells_keep_a_failure_row(temp_db):
+    qs_id = temp_db.create_query_set(name="Err Test")
+    q_id = temp_db.add_query(qs_id, "test query", "negation")
+    run_id = temp_db.create_run(qs_id, name="Err Run")
+    temp_db.add_evaluation(run_id, {"query_id": q_id, "provider": "brave",
+                                    "status": "search_error", "weighted_score": 0.0})
+    temp_db.add_evaluation(run_id, {"query_id": q_id, "provider": "exa",
+                                    "dimension_scores": {"relevance": {"score": 0.9}},
+                                    "weighted_score": 0.9})
+    temp_db.materialize_aggregate_scores(run_id)
+    overall = {a["provider"]: a for a in temp_db.get_aggregate_scores(run_id)
+               if a["dimension"] == "overall"}
+    assert overall["brave"]["failure_rate"] == 1.0
+    assert overall["brave"]["n_queries"] == 0 and overall["brave"]["mean_score"] is None
+    assert overall["exa"]["mean_score"] == pytest.approx(0.9)
+
+
+def test_migration_backfills_legacy_evaluation_mode_and_status(tmp_path):
+    import json
+    import sqlite3
+
+    path = tmp_path / "legacy.db"
+    conn = sqlite3.connect(path)
+    conn.executescript("""
+        CREATE TABLE search_results (id TEXT PRIMARY KEY, run_id TEXT, query_id TEXT,
+            provider TEXT NOT NULL, search_mode TEXT, results TEXT NOT NULL, latency_ms REAL,
+            cost_usd REAL, error TEXT, timestamp TIMESTAMP);
+        CREATE TABLE evaluations (id TEXT PRIMARY KEY, run_id TEXT, query_id TEXT,
+            provider TEXT NOT NULL, result_index INTEGER, scores TEXT NOT NULL,
+            weighted_score REAL, reasoning TEXT, failure_mode TEXT, judge_model TEXT,
+            timestamp TIMESTAMP);
+    """)
+    conn.executemany("INSERT INTO search_results (id, run_id, query_id, provider, search_mode,"
+                     " results) VALUES (?, 'r', ?, ?, ?, '[]')",
+                     [("s1", "q1", "exa", "neural"), ("s2", "q2", "exa", "neural"),
+                      ("s3", "q2", "exa", "auto"), ("s4", "q1", "brave", None)])
+    conn.executemany("INSERT INTO evaluations (id, run_id, query_id, provider, scores,"
+                     " failure_mode) VALUES (?, 'r', ?, ?, '{}', ?)",
+                     [("e1", "q1", "exa", json.dumps([])),
+                      ("e2", "q2", "exa", json.dumps(["evaluation_failed"])),
+                      ("e3", "q1", "brave", json.dumps(["search_failed"]))])
+    conn.commit()
+    conn.close()
+
+    Database(path)
+    conn = sqlite3.connect(path)
+    rows = {r[0]: r[1:] for r in conn.execute(
+        "SELECT id, search_mode, status FROM evaluations")}
+    assert rows["e1"] == ("neural", "ok")  # one search result: mode known
+    assert rows["e2"] == (None, "judge_error")  # two modes: left unknown
+    assert rows["e3"] == (None, "search_error")

@@ -1,7 +1,7 @@
 """Data models for the adversarial query optimizer."""
 
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 from uuid import uuid4
 
@@ -75,7 +75,11 @@ class EvolutionConfig:
     budget_limit: float = 5.0  # USD
     fitness_mode: str = "llm_judge"  # "llm_judge", "cross_encoder", "embedding_sim"
     seed_queries: list[str] = field(default_factory=list)
+    # Category of each seed query (parallel to seed_queries). Seeds keep their
+    # true category; they are never relabelled at random.
+    seed_categories: list[str] = field(default_factory=list)
     target_categories: list[str] = field(default_factory=list)
+    seed: int = 0
 
 
 @dataclass
@@ -87,7 +91,7 @@ class OptimizationResult:
     total_evaluations: int
     total_cost: float
     fitness_history: list[dict[str, float]]  # generation -> {mean, max, min}
-    started_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    started_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     completed_at: datetime | None = None
     config: EvolutionConfig | None = None
 

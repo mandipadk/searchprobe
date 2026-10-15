@@ -1,7 +1,16 @@
-"""Cost tracking for API usage."""
+"""Cost tracking and budget enforcement for API usage.
 
+Budget enforcement uses *reservations*: before an operation is dispatched, its
+estimated cost is reserved; the reservation fails if spent + reserved +
+estimate would exceed the budget. This closes the check-then-act race where
+many concurrent tasks all pass a "spent < budget" check before any cost is
+recorded.
+"""
+
+import asyncio
+import threading
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 
@@ -12,7 +21,7 @@ class CostRecord:
     provider: str
     operation: str  # e.g., "search", "content"
     cost_usd: float
-    timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    timestamp: datetime = field(default_factory=lambda: datetime.now(UTC))
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
@@ -49,6 +58,70 @@ class CostTracker:
         self.budget_limit = budget_limit
         self.records: list[CostRecord] = []
         self._total_by_provider: dict[str, float] = {}
+        self._reserved: dict[int, float] = {}
+        self._next_reservation = 0
+        self._lock = threading.Lock()
+
+    # -- reservations -----------------------------------------------------
+
+    def try_reserve(self, estimate_usd: float) -> int | None:
+        """Reserve ``estimate_usd`` of budget.
+
+        Returns:
+            A reservation id, or None if the reservation would exceed the budget.
+        """
+        with self._lock:
+            if self.budget_limit is not None:
+                committed = self.get_total() + sum(self._reserved.values())
+                if committed + estimate_usd > self.budget_limit + 1e-12:
+                    return None
+            rid = self._next_reservation
+            self._next_reservation += 1
+            self._reserved[rid] = estimate_usd
+            return rid
+
+    async def reserve(self, estimate_usd: float, poll_seconds: float = 0.02) -> int | None:
+        """Like :meth:`try_reserve`, but while other reservations are outstanding, wait
+        for them to settle and retry: they usually commit less than they reserved.
+
+        Returns None when the estimate cannot fit even if every outstanding reservation
+        settled at zero cost (waiting would be pointless), or once nothing is in flight.
+        """
+        while True:
+            rid = self.try_reserve(estimate_usd)
+            if rid is not None or self.reserved_total == 0:
+                return rid
+            if (
+                self.budget_limit is not None
+                and self.get_total() + estimate_usd > self.budget_limit + 1e-12
+            ):
+                return None
+            await asyncio.sleep(poll_seconds)
+
+    def release(self, reservation: int | None) -> None:
+        """Release a reservation without recording cost (operation not run)."""
+        if reservation is None:
+            return
+        with self._lock:
+            self._reserved.pop(reservation, None)
+
+    def commit(
+        self,
+        reservation: int | None,
+        provider: str,
+        operation: str,
+        cost_usd: float,
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
+        """Replace a reservation with the actual recorded cost."""
+        self.release(reservation)
+        if cost_usd > 0:
+            self.record(provider, operation, cost_usd, metadata)
+
+    @property
+    def reserved_total(self) -> float:
+        with self._lock:
+            return sum(self._reserved.values())
 
     def record(
         self,

@@ -1,16 +1,15 @@
 """Evaluate benchmark command."""
 
 import asyncio
-from typing import Optional
 
 import typer
 from rich.console import Console
-from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn
+from rich.progress import BarColumn, Progress, SpinnerColumn, TaskProgressColumn, TextColumn
 from rich.table import Table
 
 from searchprobe.config import get_settings
 from searchprobe.evaluation.judge import SearchJudge
-from searchprobe.evaluation.statistics import summary_statistics, compare_providers
+from searchprobe.evaluation.statistics import compare_all_systems, summary_statistics
 from searchprobe.providers.models import SearchResponse, SearchResult
 from searchprobe.storage import Database
 
@@ -26,19 +25,19 @@ def evaluate(
         "-r",
         help="Run ID to evaluate (or 'latest')",
     ),
-    max_results: Optional[int] = typer.Option(
+    max_results: int | None = typer.Option(
         None,
         "--max-results",
         "-n",
         help="Maximum number of results to evaluate",
     ),
-    categories: Optional[str] = typer.Option(
+    categories: str | None = typer.Option(
         None,
         "--categories",
         "-c",
         help="Comma-separated categories to evaluate (default: all)",
     ),
-    providers: Optional[str] = typer.Option(
+    providers: str | None = typer.Option(
         None,
         "--providers",
         "-p",
@@ -91,16 +90,12 @@ def evaluate(
     # Filter by category if specified
     if categories:
         category_list = [c.strip().lower() for c in categories.split(",")]
-        results_to_eval = [
-            r for r in results_to_eval if r["category"] in category_list
-        ]
+        results_to_eval = [r for r in results_to_eval if r["category"] in category_list]
 
     # Filter by provider if specified
     if providers:
         provider_list = [p.strip().lower() for p in providers.split(",")]
-        results_to_eval = [
-            r for r in results_to_eval if r["provider"] in provider_list
-        ]
+        results_to_eval = [r for r in results_to_eval if r["provider"] in provider_list]
 
     if not results_to_eval:
         console.print("[yellow]No results to evaluate.[/yellow]")
@@ -117,13 +112,15 @@ def evaluate(
     eval_batch = []
     for result_item in results_to_eval:
         search_response = _reconstruct_response(result_item)
-        eval_batch.append({
-            "query_id": result_item["query_id"],
-            "query_text": result_item["query_text"],
-            "category": result_item["category"],
-            "search_response": search_response,
-            "ground_truth": result_item.get("ground_truth"),
-        })
+        eval_batch.append(
+            {
+                "query_id": result_item["query_id"],
+                "query_text": result_item["query_text"],
+                "category": result_item["category"],
+                "search_response": search_response,
+                "ground_truth": result_item.get("ground_truth"),
+            }
+        )
 
     # Evaluate concurrently with progress
     all_evaluations = []
@@ -142,7 +139,7 @@ def evaluate(
     async def _run_evaluations():
         return await judge.evaluate_batch(
             eval_batch,
-            max_concurrent=5,
+            max_concurrent=settings.max_concurrent_requests,
             on_complete=_on_complete,
         )
 
@@ -205,6 +202,13 @@ def _display_summary(evaluations: list[dict], show_comparisons: bool) -> None:
 
     # Overall stats
     console.print("\n[bold]Evaluation Summary[/bold]")
+    if stats["count"] == 0:  # every evaluation was a search or judge error
+        console.print(
+            f"  [red]No quality evaluations: {stats.get('excluded_errors', 0)} errors[/red]"
+        )
+        for system, rate in sorted(stats.get("error_rate_by_system", {}).items()):
+            console.print(f"  {system}: {rate:.0%} errors")
+        return
     console.print(f"  Total evaluated: {stats['count']}")
     console.print(f"  Mean score: {stats['mean']:.3f}")
     console.print(f"  Median score: {stats['median']:.3f}")
@@ -266,35 +270,26 @@ def _display_summary(evaluations: list[dict], show_comparisons: bool) -> None:
         for mode, count in list(stats["failure_modes"].items())[:10]:
             console.print(f"  {mode}: {count}")
 
-    # Provider comparisons
+    # Error rates (infrastructure failures are excluded from the scores above)
+    if stats.get("excluded_errors"):
+        console.print(
+            f"\n[yellow]Excluded {stats['excluded_errors']} infrastructure failures "
+            "(search/judge errors) from quality scores.[/yellow]"
+        )
+        for system, rate in sorted(stats.get("error_rate_by_system", {}).items()):
+            if rate:
+                console.print(f"  {system}: {rate:.1%} error rate")
+
+    # System comparisons: paired by query, BH-corrected across all pairs
     if show_comparisons and len(stats.get("by_provider", {})) >= 2:
-        console.print("\n[bold]Provider Comparisons[/bold]")
-
-        providers = list(stats["by_provider"].keys())
-        for i, prov_a in enumerate(providers):
-            for prov_b in providers[i + 1:]:
-                # Get scores for comparison
-                scores_a = [
-                    e["weighted_score"]
-                    for e in evaluations
-                    if f"{e['provider']}:{e.get('search_mode', 'default')}" == prov_a
-                ]
-                scores_b = [
-                    e["weighted_score"]
-                    for e in evaluations
-                    if f"{e['provider']}:{e.get('search_mode', 'default')}" == prov_b
-                ]
-
-                if scores_a and scores_b:
-                    comparison = compare_providers(
-                        prov_a, scores_a, prov_b, scores_b, paired=False
-                    )
-
-                    sig_marker = "*" if comparison.significant else ""
-                    winner = prov_a if comparison.mean_diff > 0 else prov_b
-                    console.print(
-                        f"  {prov_a} vs {prov_b}: "
-                        f"Δ={comparison.mean_diff:+.3f} "
-                        f"(p={comparison.p_value:.3f}{sig_marker}) "
-                        f"[{winner} wins]"
-                    )
+        console.print("\n[bold]System Comparisons[/bold] (paired by query, BH-corrected)")
+        for comp in compare_all_systems(evaluations):
+            sig_marker = "*" if comp.significant else ""
+            winner = comp.provider_a if comp.mean_diff > 0 else comp.provider_b
+            console.print(
+                f"  {comp.provider_a} vs {comp.provider_b}: "
+                f"Δ={comp.mean_diff:+.3f} "
+                f"[{comp.ci.lower:+.3f}, {comp.ci.upper:+.3f}] "
+                f"(p={comp.p_value:.3f}{sig_marker}, n={comp.ci.n}) "
+                f"[{winner} ahead]"
+            )

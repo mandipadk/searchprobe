@@ -2,7 +2,6 @@
 
 import streamlit as st
 
-from searchprobe.reporting.charts import create_sensitivity_map_chart
 from searchprobe.storage import Database
 
 
@@ -63,7 +62,10 @@ def render(db: Database, run_id: str) -> None:
                     y=op_means,
                     text=[f"{m:.3f} (n={c})" for m, c in zip(op_means, op_counts)],
                     textposition="outside",
-                    marker_color=["#e74c3c" if m < 0.5 else "#f1c40f" if m < 0.7 else "#2ecc71" for m in op_means],
+                    marker_color=[
+                        "#e74c3c" if m < 0.5 else "#f1c40f" if m < 0.7 else "#2ecc71"
+                        for m in op_means
+                    ],
                 )
             ]
         )

@@ -22,7 +22,10 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
         latency = (time.perf_counter() - start) * 1000
         logger.info(
             "%s %s -> %d (%.0fms)",
-            request.method, request.url.path, response.status_code, latency,
+            request.method,
+            request.url.path,
+            response.status_code,
+            latency,
         )
         return response
 
@@ -41,9 +44,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         now = time.time()
 
         # Clean old entries
-        self._requests[client_ip] = [
-            t for t in self._requests[client_ip] if now - t < self._window
-        ]
+        self._requests[client_ip] = [t for t in self._requests[client_ip] if now - t < self._window]
 
         if len(self._requests[client_ip]) >= self._max_requests:
             return Response(
@@ -61,7 +62,7 @@ def setup_middleware(app: FastAPI) -> None:
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["*"],
-        allow_credentials=True,
+        allow_credentials=False,  # wildcard origins must never be combined with credentials
         allow_methods=["*"],
         allow_headers=["*"],
     )

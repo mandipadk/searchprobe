@@ -72,9 +72,7 @@ def constraint_inject(individual: Individual, **kwargs: Any) -> Individual:
     constraint = random.choice(constraints)
     new_query = f"{individual.query} {constraint}"
 
-    return _new_individual(
-        individual, new_query, f"constraint_inject('{constraint}')"
-    )
+    return _new_individual(individual, new_query, f"constraint_inject('{constraint}')")
 
 
 def specificity_shift(individual: Individual, **kwargs: Any) -> Individual:
@@ -110,7 +108,9 @@ def specificity_shift(individual: Individual, **kwargs: Any) -> Individual:
     return _new_individual(individual, new_query, detail)
 
 
-def category_blend(individual: Individual, partner: Individual | None = None, **kwargs: Any) -> Individual:
+def category_blend(
+    individual: Individual, partner: Individual | None = None, **kwargs: Any
+) -> Individual:
     """Combine features from two adversarial categories.
 
     Takes a query and blends in challenge patterns from a different category.
@@ -131,9 +131,7 @@ def category_blend(individual: Individual, partner: Individual | None = None, **
     insert_pos = random.randint(0, len(words))
     new_words = words[:insert_pos] + pattern.split() + words[insert_pos:]
 
-    return _new_individual(
-        individual, " ".join(new_words), f"category_blend('{pattern}')"
-    )
+    return _new_individual(individual, " ".join(new_words), f"category_blend('{pattern}')")
 
 
 def tense_flip(individual: Individual, **kwargs: Any) -> Individual:
@@ -195,7 +193,8 @@ def entity_swap(individual: Individual, **kwargs: Any) -> Individual:
         if word in entity_swaps:
             words[i] = entity_swaps[word]
             return _new_individual(
-                individual, " ".join(words),
+                individual,
+                " ".join(words),
                 f"entity_swap('{word}'→'{entity_swaps[word]}')",
             )
 

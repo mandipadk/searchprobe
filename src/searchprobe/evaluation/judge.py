@@ -1,20 +1,40 @@
-"""LLM-as-judge for evaluating search results."""
+"""List-level LLM-as-judge for search results.
 
-import json
-import re
+This judge scores a whole top-k list per dimension. It is kept for the
+legacy ``evaluate`` flow; the per-document constraint judge in
+``searchprobe.judging`` is the primary instrument because it yields
+document-level labels (nDCG, violation@k, pooling).
+"""
+
+from __future__ import annotations
+
+import asyncio
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from typing import Any, Callable
+from datetime import UTC, datetime
+from typing import Any
 
-from searchprobe.config import Settings, get_anthropic_client, get_settings
-from searchprobe.core.exceptions import ConfigurationError, EvaluationError
+from searchprobe.config import Settings, get_settings
+from searchprobe.core.exceptions import ConfigurationError
 from searchprobe.evaluation.dimensions import (
     EvaluationDimension,
-    get_active_dimensions,
     calculate_weighted_score,
+    get_active_dimensions,
 )
-from searchprobe.evaluation.prompts import JUDGE_SYSTEM_PROMPT, build_evaluation_prompt
+from searchprobe.evaluation.prompts import (
+    JUDGE_SYSTEM_PROMPT,
+    PROMPT_VERSION,
+    build_evaluation_prompt,
+)
+from searchprobe.intelligence.taxonomy import JUDGE_FAILURE_MODES
+from searchprobe.llm import get_async_client, structured_call
 from searchprobe.providers.models import SearchResponse
+
+# Evaluation statuses. Only ``ok`` and ``no_results`` measure retrieval quality.
+STATUS_OK = "ok"
+STATUS_NO_RESULTS = "no_results"
+STATUS_SEARCH_ERROR = "search_error"
+STATUS_JUDGE_ERROR = "judge_error"
 
 
 @dataclass
@@ -39,9 +59,18 @@ class EvaluationResult:
     failure_modes: list[str]
     best_result_index: int | None
     overall_assessment: str
-    evaluated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    status: str = STATUS_OK
+    judge_model: str | None = None
+    prompt_version: str = PROMPT_VERSION
+    cost_usd: float = 0.0
+    evaluated_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     raw_response: str | None = None
     error: str | None = None
+
+    @property
+    def counts_for_quality(self) -> bool:
+        """Whether this result measures retrieval quality (not infrastructure)."""
+        return self.status in (STATUS_OK, STATUS_NO_RESULTS)
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for storage."""
@@ -50,6 +79,7 @@ class EvaluationResult:
             "provider": self.provider,
             "search_mode": self.search_mode,
             "category": self.category,
+            "status": self.status,
             "dimension_scores": {
                 k: {"score": v.score, "justification": v.justification}
                 for k, v in self.dimension_scores.items()
@@ -58,40 +88,85 @@ class EvaluationResult:
             "failure_modes": self.failure_modes,
             "best_result_index": self.best_result_index,
             "overall_assessment": self.overall_assessment,
+            "judge_model": self.judge_model,
+            "prompt_version": self.prompt_version,
+            "cost_usd": self.cost_usd,
             "evaluated_at": self.evaluated_at.isoformat(),
             "error": self.error,
         }
 
 
-class SearchJudge:
-    """LLM-based judge for evaluating search result quality.
+def build_judge_schema(dimensions: list[str]) -> dict[str, Any]:
+    """JSON schema for the list-level judge's structured output."""
+    dim_schema = {
+        "type": "object",
+        "properties": {
+            "score": {"type": "number"},
+            "justification": {"type": "string"},
+        },
+        "required": ["score", "justification"],
+        "additionalProperties": False,
+    }
+    return {
+        "type": "object",
+        "properties": {
+            "scores": {
+                "type": "object",
+                "properties": dict.fromkeys(dimensions, dim_schema),
+                "required": list(dimensions),
+                "additionalProperties": False,
+            },
+            "failure_modes": {
+                "type": "array",
+                "items": {"type": "string", "enum": JUDGE_FAILURE_MODES},
+            },
+            "best_result_index": {"anyOf": [{"type": "integer"}, {"type": "null"}]},
+            "overall_assessment": {"type": "string"},
+        },
+        "required": ["scores", "failure_modes", "best_result_index", "overall_assessment"],
+        "additionalProperties": False,
+    }
 
-    Uses Claude to assess search results across multiple dimensions,
-    with category-specific weighting and failure mode detection.
-    """
+
+class SearchJudge:
+    """LLM-based judge for evaluating search result quality."""
 
     def __init__(
         self,
         settings: Settings | None = None,
-        model: str = "claude-sonnet-4-6",
+        model: str | None = None,
+        client: Any | None = None,
     ) -> None:
         """Initialize the judge.
 
         Args:
-            settings: Application settings
-            model: Anthropic model to use for evaluation
+            settings: Application settings (``judge_model``/``judge_effort`` are honored).
+            model: Override the judge model.
+            client: Pre-built async client (tests inject fakes here).
         """
         self.settings = settings or get_settings()
-        self.model = model
+        self.model = model or self.settings.judge_model
+        self.effort = self.settings.judge_effort
 
-        if not self.settings.has_anthropic_configured():
-            raise ConfigurationError(
-                "Anthropic credentials required for evaluation. "
-                "Set SEARCHPROBE_ANTHROPIC_API_KEY in .env, or enable Vertex AI with "
-                "SEARCHPROBE_USE_VERTEX_AI=true and SEARCHPROBE_VERTEX_PROJECT_ID"
-            )
+        if client is not None:
+            self.client = client
+        else:
+            if not self.settings.has_anthropic_configured():
+                raise ConfigurationError(
+                    "Anthropic credentials required for evaluation. "
+                    "Set SEARCHPROBE_ANTHROPIC_API_KEY in .env, or enable Vertex AI with "
+                    "SEARCHPROBE_USE_VERTEX_AI=true and SEARCHPROBE_VERTEX_PROJECT_ID"
+                )
+            self.client = get_async_client(self.settings)
 
-        self.client = get_anthropic_client(self.settings)
+    def _base_result(self, search_response: SearchResponse, query_id: str, category: str):
+        return {
+            "query_id": query_id,
+            "provider": search_response.provider,
+            "search_mode": search_response.search_mode,
+            "category": category,
+            "judge_model": self.model,
+        }
 
     async def evaluate(
         self,
@@ -101,142 +176,97 @@ class SearchJudge:
         search_response: SearchResponse,
         ground_truth: dict | None = None,
     ) -> EvaluationResult:
-        """Evaluate search results for a query.
+        """Evaluate search results for a query."""
+        base = self._base_result(search_response, query_id, category)
 
-        Args:
-            query_id: Unique query identifier
-            query_text: The search query
-            category: Adversarial category
-            search_response: Search results to evaluate
-            ground_truth: Optional ground truth for calibration
-
-        Returns:
-            EvaluationResult with scores and analysis
-        """
-        # Handle failed searches
-        if search_response.error or not search_response.results:
+        if search_response.error:
             return EvaluationResult(
-                query_id=query_id,
-                provider=search_response.provider,
-                search_mode=search_response.search_mode,
-                category=category,
+                **base,
                 dimension_scores={},
                 weighted_score=0.0,
-                failure_modes=["search_failed" if search_response.error else "no_results"],
+                failure_modes=["search_failed"],
                 best_result_index=None,
-                overall_assessment=search_response.error or "No results returned",
+                overall_assessment=search_response.error,
+                status=STATUS_SEARCH_ERROR,
                 error=search_response.error,
             )
+        if not search_response.results:
+            return EvaluationResult(
+                **base,
+                dimension_scores={},
+                weighted_score=0.0,
+                failure_modes=["no_results"],
+                best_result_index=None,
+                overall_assessment="No results returned",
+                status=STATUS_NO_RESULTS,
+            )
 
-        # Get dimensions for this category
-        dimensions = get_active_dimensions(category)
-        dimension_names = [d.value for d in dimensions]
-
-        # Convert results to dicts
+        dimensions = [d.value for d in get_active_dimensions(category)]
         results_dicts = [
-            {
-                "title": r.title,
-                "url": str(r.url),
-                "snippet": r.snippet,
-                "content": r.content,
-            }
+            {"title": r.title, "url": str(r.url), "snippet": r.snippet, "content": r.content}
             for r in search_response.results
         ]
-
-        # Build evaluation prompt
         prompt = build_evaluation_prompt(
             query=query_text,
             category=category,
             results=results_dicts,
-            dimensions=dimension_names,
+            dimensions=dimensions,
             ground_truth=ground_truth,
         )
 
-        # Call Claude
         try:
-            response = self.client.messages.create(
+            result = await structured_call(
+                self.client,
                 model=self.model,
-                max_tokens=2000,
                 system=JUDGE_SYSTEM_PROMPT,
-                messages=[{"role": "user", "content": prompt}],
+                prompt=prompt,
+                schema=build_judge_schema(dimensions),
+                effort=self.effort,
             )
-
-            raw_response = response.content[0].text
-
-            # Parse JSON response
-            evaluation_data = self._parse_response(raw_response)
-
-            # Build dimension scores
-            dimension_scores = {}
-            for dim_name, score_data in evaluation_data.get("scores", {}).items():
-                try:
-                    dim_enum = EvaluationDimension(dim_name)
-                    dimension_scores[dim_name] = DimensionScore(
-                        dimension=dim_enum,
-                        score=float(score_data.get("score", 0.0)),
-                        justification=score_data.get("justification", ""),
-                    )
-                except ValueError:
-                    # Unknown dimension, skip
-                    pass
-
-            # Calculate weighted score
-            scores_dict = {
-                EvaluationDimension(k): v.score for k, v in dimension_scores.items()
-            }
-            weighted_score = calculate_weighted_score(scores_dict, category)
-
+        except Exception as e:  # any judge failure (LLMError, API, network) is infra
             return EvaluationResult(
-                query_id=query_id,
-                provider=search_response.provider,
-                search_mode=search_response.search_mode,
-                category=category,
-                dimension_scores=dimension_scores,
-                weighted_score=weighted_score,
-                failure_modes=evaluation_data.get("failure_modes", []),
-                best_result_index=evaluation_data.get("best_result_index"),
-                overall_assessment=evaluation_data.get("overall_assessment", ""),
-                raw_response=raw_response,
-            )
-
-        except Exception as e:
-            error = EvaluationError(
-                f"Evaluation failed for query {query_id}: {e}"
-            )
-            error.__cause__ = e
-            return EvaluationResult(
-                query_id=query_id,
-                provider=search_response.provider,
-                search_mode=search_response.search_mode,
-                category=category,
+                **base,
                 dimension_scores={},
                 weighted_score=0.0,
-                failure_modes=["evaluation_failed"],
+                failure_modes=["judge_failed"],
                 best_result_index=None,
                 overall_assessment="",
-                error=str(error),
+                status=STATUS_JUDGE_ERROR,
+                error=f"Evaluation failed for query {query_id}: {e}",
             )
 
-    def _parse_response(self, response_text: str) -> dict:
-        """Parse JSON from LLM response.
+        data = result.data
+        dimension_scores: dict[str, DimensionScore] = {}
+        for dim_name, score_data in data.get("scores", {}).items():
+            try:
+                dim_enum = EvaluationDimension(dim_name)
+            except ValueError:
+                continue
+            score = min(1.0, max(0.0, float(score_data.get("score", 0.0))))
+            dimension_scores[dim_name] = DimensionScore(
+                dimension=dim_enum,
+                score=score,
+                justification=score_data.get("justification", ""),
+            )
 
-        Args:
-            response_text: Raw response from Claude
+        weighted_score = calculate_weighted_score(
+            {EvaluationDimension(k): v.score for k, v in dimension_scores.items()}, category
+        )
+        best = data.get("best_result_index")
+        if not isinstance(best, int) or not 1 <= best <= len(results_dicts):
+            best = None
 
-        Returns:
-            Parsed evaluation data
-        """
-        from searchprobe.utils.parsing import extract_json_from_llm_response
-
-        try:
-            return extract_json_from_llm_response(response_text)
-        except ValueError:
-            return {
-                "scores": {},
-                "failure_modes": ["parse_error"],
-                "best_result_index": None,
-                "overall_assessment": "Failed to parse evaluation response",
-            }
+        return EvaluationResult(
+            **base,
+            dimension_scores=dimension_scores,
+            weighted_score=weighted_score,
+            failure_modes=list(dict.fromkeys(data.get("failure_modes", []))),
+            best_result_index=best,
+            overall_assessment=data.get("overall_assessment", ""),
+            status=STATUS_OK,
+            cost_usd=result.cost_usd,
+            raw_response=result.raw_text,
+        )
 
     async def evaluate_batch(
         self,
@@ -244,38 +274,20 @@ class SearchJudge:
         max_concurrent: int = 5,
         on_complete: Callable[[EvaluationResult, int], None] | None = None,
     ) -> list[EvaluationResult]:
-        """Evaluate multiple query results concurrently.
-
-        Args:
-            evaluations: List of dicts with query_id, query_text, category,
-                        search_response, and optional ground_truth
-            max_concurrent: Maximum concurrent LLM calls
-            on_complete: Optional callback(result, index) after each evaluation
-
-        Returns:
-            List of EvaluationResults in original order
-        """
-        import asyncio
-
+        """Evaluate multiple query results concurrently, preserving input order."""
         semaphore = asyncio.Semaphore(max_concurrent)
 
-        async def _bounded_evaluate(index: int, eval_item: dict) -> tuple[int, EvaluationResult]:
+        async def _bounded(index: int, item: dict) -> EvaluationResult:
             async with semaphore:
                 result = await self.evaluate(
-                    query_id=eval_item["query_id"],
-                    query_text=eval_item["query_text"],
-                    category=eval_item["category"],
-                    search_response=eval_item["search_response"],
-                    ground_truth=eval_item.get("ground_truth"),
+                    query_id=item["query_id"],
+                    query_text=item["query_text"],
+                    category=item["category"],
+                    search_response=item["search_response"],
+                    ground_truth=item.get("ground_truth"),
                 )
-                if on_complete:
-                    on_complete(result, index)
-                return index, result
+            if on_complete:
+                on_complete(result, index)
+            return result
 
-        indexed_results = await asyncio.gather(
-            *[_bounded_evaluate(i, e) for i, e in enumerate(evaluations)]
-        )
-
-        # Restore original order
-        indexed_results.sort(key=lambda x: x[0])
-        return [r for _, r in indexed_results]
+        return list(await asyncio.gather(*[_bounded(i, e) for i, e in enumerate(evaluations)]))

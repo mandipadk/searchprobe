@@ -63,7 +63,7 @@ class TestResilientProviderSuccess:
     async def test_passes_through_success(self):
         fake = FakeProvider()
         fake.responses = [_ok_response()]
-        provider = ResilientProvider(fake, max_retries=3)
+        provider = ResilientProvider(fake, max_retries=3, base_delay=0)
         request = SearchRequest(query="test")
         response = await provider.search(request)
         assert response.success
@@ -88,7 +88,7 @@ class TestResilientProviderRetry:
             _error_response(error="temporary"),
             _ok_response(),
         ]
-        provider = ResilientProvider(fake, max_retries=3)
+        provider = ResilientProvider(fake, max_retries=3, base_delay=0)
         request = SearchRequest(query="test")
         response = await provider.search(request)
         assert response.success
@@ -102,7 +102,7 @@ class TestResilientProviderRetry:
             _error_response(error="fail2"),
             _error_response(error="fail3"),
         ]
-        provider = ResilientProvider(fake, max_retries=3)
+        provider = ResilientProvider(fake, max_retries=3, base_delay=0)
         request = SearchRequest(query="test")
         response = await provider.search(request)
         assert response.error is not None
@@ -119,7 +119,7 @@ class TestResilientProviderExceptions:
             ProviderError("API down", provider="fake"),
             ProviderError("API down", provider="fake"),
         ]
-        provider = ResilientProvider(fake, max_retries=3)
+        provider = ResilientProvider(fake, max_retries=3, base_delay=0)
         request = SearchRequest(query="test")
         # Should NOT raise — should return error response
         response = await provider.search(request)
@@ -135,7 +135,7 @@ class TestResilientProviderExceptions:
             RateLimitError("429", provider="fake"),
             RateLimitError("429", provider="fake"),
         ]
-        provider = ResilientProvider(fake, max_retries=3)
+        provider = ResilientProvider(fake, max_retries=3, base_delay=0)
         request = SearchRequest(query="test")
         response = await provider.search(request)
         assert response.error is not None
@@ -148,7 +148,7 @@ class TestResilientProviderExceptions:
             RuntimeError("unexpected"),
             RuntimeError("unexpected"),
         ]
-        provider = ResilientProvider(fake, max_retries=3)
+        provider = ResilientProvider(fake, max_retries=3, base_delay=0)
         request = SearchRequest(query="test")
         response = await provider.search(request)
         assert response.error is not None
@@ -159,7 +159,7 @@ class TestResilientProviderCircuitBreaker:
     async def test_circuit_opens_after_failures(self):
         fake = FakeProvider()
         breaker = CircuitBreaker(failure_threshold=2, recovery_timeout=60.0)
-        provider = ResilientProvider(fake, max_retries=1, circuit_breaker=breaker)
+        provider = ResilientProvider(fake, max_retries=1, circuit_breaker=breaker, base_delay=0)
 
         # Two failures to open the circuit
         fake.responses = [_error_response(error="fail")]
@@ -175,3 +175,63 @@ class TestResilientProviderCircuitBreaker:
         assert response.error is not None
         assert "Circuit breaker open" in response.error
         assert fake.call_count == 0  # Didn't even call the provider
+
+
+class TestTransientClassification:
+    @pytest.mark.asyncio
+    async def test_auth_errors_are_not_retried(self):
+        fake = FakeProvider()
+        fake.responses = [_error_response(error="401 Unauthorized: invalid api key")] * 3
+        provider = ResilientProvider(fake, max_retries=3, base_delay=0)
+        response = await provider.search(SearchRequest(query="test"))
+        assert response.error is not None
+        assert fake.call_count == 1
+
+    @pytest.mark.asyncio
+    async def test_every_attempt_takes_a_rate_limit_token(self):
+        fake = FakeProvider()
+        fake.responses = [_error_response(error="503 unavailable")] * 2 + [_ok_response()]
+        tokens = []
+
+        async def acquire():
+            tokens.append(1)
+
+        provider = ResilientProvider(fake, max_retries=3, base_delay=0, before_attempt=acquire)
+        response = await provider.search(SearchRequest(query="test"))
+        assert response.success
+        assert len(tokens) == 3
+
+    @pytest.mark.parametrize(
+        "msg,expected",
+        [
+            ("429 Too Many Requests", True),
+            ("Read timed out", True),
+            ("could not generate an accurate answer", True),  # unknown -> retry
+            ("403 Forbidden", False),
+            ("Bad Request: query too long", False),
+        ],
+    )
+    def test_is_transient_error(self, msg, expected):
+        from searchprobe.providers.base import is_transient_error
+
+        assert is_transient_error(msg) is expected
+
+    @pytest.mark.parametrize(
+        "msg,expected",
+        [("generate failed", False), ("accurate", False), ("429", True), ("Rate limit hit", True)],
+    )
+    def test_looks_rate_limited_ignores_words_containing_rate(self, msg, expected):
+        from searchprobe.providers.base import looks_rate_limited
+
+        assert looks_rate_limited(msg) is expected
+
+
+class TestHalfOpenSingleProbe:
+    def test_only_one_probe_admitted(self):
+        breaker = CircuitBreaker(failure_threshold=1, recovery_timeout=0.0)
+        breaker.record_failure()
+        assert breaker.state == CircuitState.OPEN
+        admitted = [breaker.can_execute() for _ in range(5)]
+        assert admitted == [True, False, False, False, False]
+        breaker.record_success()
+        assert breaker.can_execute()

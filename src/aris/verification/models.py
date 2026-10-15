@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 
 class ConstraintStatus(str, Enum):
     """Status of a constraint check."""
+
     SATISFIED = "satisfied"
     VIOLATED = "violated"
     UNKNOWN = "unknown"  # Could not determine

@@ -1,14 +1,14 @@
 """Run benchmark command."""
 
 import asyncio
-from typing import Optional
 
 import typer
 from rich.console import Console
-from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn
+from rich.progress import BarColumn, Progress, SpinnerColumn, TaskProgressColumn, TextColumn
 from rich.table import Table
 
 from searchprobe.config import get_settings
+from searchprobe.core.systems import system_key_of
 from searchprobe.pipeline.runner import BenchmarkConfig, BenchmarkRunner
 from searchprobe.providers.registry import ProviderRegistry
 from searchprobe.storage import Database
@@ -19,7 +19,7 @@ app = typer.Typer(help="Run search benchmarks against providers.")
 
 @app.callback(invoke_without_command=True)
 def run(
-    providers: Optional[str] = typer.Option(
+    providers: str | None = typer.Option(
         None,
         "--providers",
         "-p",
@@ -31,7 +31,7 @@ def run(
         "-m",
         help="Comma-separated Exa search modes: auto,neural,fast,deep",
     ),
-    query: Optional[str] = typer.Option(
+    query: str | None = typer.Option(
         None,
         "--query",
         "-q",
@@ -42,7 +42,7 @@ def run(
         "--query-set",
         help="Query set ID to use (or 'latest')",
     ),
-    max_queries: Optional[int] = typer.Option(
+    max_queries: int | None = typer.Option(
         None,
         "--max-queries",
         "-n",
@@ -54,7 +54,7 @@ def run(
         "-r",
         help="Number of results per query",
     ),
-    run_name: Optional[str] = typer.Option(
+    run_name: str | None = typer.Option(
         None,
         "--name",
         help="Human-readable name for this run",
@@ -79,7 +79,8 @@ def run(
         provider_list = [p.strip().lower() for p in providers.split(",")]
         # Validate providers exist
         available = ProviderRegistry.list_available()
-        invalid = [p for p in provider_list if p not in available]
+        # "aris+<base>" wraps a base provider with Aris's verify-and-rerank layer.
+        invalid = [p for p in provider_list if p.removeprefix("aris+") not in available]
         if invalid:
             console.print(f"[red]Unknown providers: {invalid}[/red]")
             console.print(f"Available: {available}")
@@ -133,7 +134,9 @@ def run(
             ]
         else:
             queries_to_run = db.get_queries(query_set_id=query_set_id, limit=max_queries)
-            console.print(f"[blue]Loaded {len(queries_to_run)} queries from set {query_set_id[:8]}...[/blue]")
+            console.print(
+                f"[blue]Loaded {len(queries_to_run)} queries from set {query_set_id[:8]}...[/blue]"
+            )
 
     if not queries_to_run:
         console.print("[red]No queries to run.[/red]")
@@ -148,7 +151,7 @@ def run(
     num_tasks += len(queries_to_run) * len([p for p in provider_list if p != "exa"])
 
     # Show plan
-    console.print(f"\n[bold]Running benchmark[/bold]")
+    console.print("\n[bold]Running benchmark[/bold]")
     console.print(f"  Providers: {', '.join(provider_list)}")
     if "exa" in provider_list:
         console.print(f"  Exa modes: {', '.join(modes)}")
@@ -213,7 +216,9 @@ def _show_providers() -> None:
 
     for name in ProviderRegistry.list_available():
         info = ProviderRegistry.get_provider_info(name)
-        status = "[green]Configured[/green]" if name in configured else "[yellow]Not configured[/yellow]"
+        status = (
+            "[green]Configured[/green]" if name in configured else "[yellow]Not configured[/yellow]"
+        )
         modes = ", ".join(info["supported_modes"])
         costs = ", ".join(f"${v}" for v in info["cost_per_query"].values())
 
@@ -231,7 +236,7 @@ def _display_results(results) -> None:
     # Group by provider for summary
     by_provider: dict[str, list] = {}
     for r in results:
-        provider_key = f"{r.provider}:{r.search_mode or 'default'}"
+        provider_key = system_key_of(r)
         if provider_key not in by_provider:
             by_provider[provider_key] = []
         by_provider[provider_key].append(r)
@@ -275,6 +280,6 @@ def _display_results(results) -> None:
 
     for r in sample_results:
         status = "[green]OK[/green]" if r.success else f"[red]ERR: {r.error}[/red]"
-        console.print(f"  [{r.provider}:{r.search_mode or 'default'}] {r.query[:50]}... -> {status}")
+        console.print(f"  [{system_key_of(r)}] {r.query[:50]}... -> {status}")
         if r.results:
             console.print(f"    Top: {r.results[0].title[:60]}...")

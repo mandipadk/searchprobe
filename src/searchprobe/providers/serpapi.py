@@ -1,11 +1,11 @@
 """SerpAPI (Google) search provider implementation."""
 
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any, ClassVar
 from urllib.parse import urlparse
 
-from searchprobe.providers.base import SearchProvider
+from searchprobe.providers.base import SearchProvider, looks_rate_limited
 from searchprobe.providers.models import SearchRequest, SearchResponse, SearchResult
 
 
@@ -73,10 +73,8 @@ class SerpAPIProvider(SearchProvider):
                 parsed_url = urlparse(url)
                 domain = parsed_url.netloc.replace("www.", "")
 
-                # Google/SerpAPI doesn't provide relevance scores
-                # Use position-based scoring
-                total = len(organic_results)
-                score = 1.0 - (i / max(total, 1)) * 0.6  # 1.0 to 0.4 range
+                # Google/SerpAPI returns no relevance score; rank is carried by ``position``.
+                score = None
 
                 # Get snippet
                 snippet = result.get("snippet", "")
@@ -105,7 +103,7 @@ class SerpAPIProvider(SearchProvider):
                 results=results,
                 latency_ms=latency_ms,
                 cost_usd=total_cost,
-                timestamp=datetime.now(timezone.utc),
+                timestamp=datetime.now(UTC),
                 metadata={
                     "engine": "google",
                     "results_requested": request.num_results,
@@ -120,7 +118,7 @@ class SerpAPIProvider(SearchProvider):
             latency_ms = (time.perf_counter() - start_time) * 1000
             error_msg = str(e)
 
-            if "rate" in error_msg.lower() or "429" in error_msg:
+            if looks_rate_limited(error_msg):
                 raise RateLimitError(error_msg, provider=self.NAME)
 
             return SearchResponse(
@@ -130,6 +128,6 @@ class SerpAPIProvider(SearchProvider):
                 results=[],
                 latency_ms=latency_ms,
                 cost_usd=0.0,
-                timestamp=datetime.now(timezone.utc),
+                timestamp=datetime.now(UTC),
                 error=error_msg,
             )

@@ -5,8 +5,6 @@ Uses SearchProbe's FailureMode taxonomy to drive strategy selection.
 
 from __future__ import annotations
 
-import re
-
 from aris.que.models import StructuredQuery
 
 # Import SearchProbe taxonomy

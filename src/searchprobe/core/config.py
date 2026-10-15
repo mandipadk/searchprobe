@@ -59,7 +59,7 @@ class SearchProbeProfile(BaseModel):
     evolution_budget: float = Field(default=5.0, ge=0.0)
 
     # Evaluation
-    judge_model: str = "claude-sonnet-4-6"
+    judge_model: str = "claude-sonnet-5-5"
     num_results: int = Field(default=10, ge=1, le=100)
 
     # Budgets & concurrency

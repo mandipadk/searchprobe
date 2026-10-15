@@ -19,9 +19,7 @@ class SensitivityMap:
 
     def get_most_sensitive_words(self, top_n: int = 5) -> list[tuple[str, float]]:
         """Get the words with highest sensitivity (most load-bearing)."""
-        sorted_words = sorted(
-            self.word_scores.items(), key=lambda x: x[1], reverse=True
-        )
+        sorted_words = sorted(self.word_scores.items(), key=lambda x: x[1], reverse=True)
         return sorted_words[:top_n]
 
     def to_dict(self) -> dict[str, Any]:

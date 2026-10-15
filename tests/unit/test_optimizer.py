@@ -144,3 +144,83 @@ class TestOptimizerEvolution:
         # Bandit should have been updated with some pulls
         total_pulls = sum(optimizer.bandit.counts.values())
         assert total_pulls > 0
+
+
+class TestPhase0Regressions:
+    def test_seeds_keep_their_true_category(self):
+        from searchprobe.adversarial.models import EvolutionConfig
+        from searchprobe.adversarial.optimizer import AdversarialQueryOptimizer
+
+        config = EvolutionConfig(
+            population_size=2,
+            seed_queries=["companies NOT in AI", "exactly 50 employees"],
+            seed_categories=["negation", "numeric_precision"],
+            target_categories=["negation", "numeric_precision"],
+        )
+        opt = AdversarialQueryOptimizer(config, FakeFitnessEvaluator())
+        pop = opt._initialize_population()
+        cats = {i.query: i.category for i in pop.individuals}
+        assert cats == {
+            "companies NOT in AI": "negation",
+            "exactly 50 employees": "numeric_precision",
+        }
+
+    def test_bandit_spreads_selections_within_a_batch(self):
+        from searchprobe.adversarial.bandit import OperatorBandit
+
+        bandit = OperatorBandit(["a", "b", "c"])
+        picks = [bandit.select() for _ in range(3)]
+        assert sorted(picks) == ["a", "b", "c"]
+
+    def test_fitness_cache_avoids_duplicate_evaluations(self):
+        import asyncio
+
+        from searchprobe.adversarial.fitness import FitnessEvaluator
+
+        calls = []
+
+        class Counting(FitnessEvaluator):
+            async def evaluate(self, individual):
+                calls.append(individual.query)
+                return 0.5
+
+        ev = Counting(mode="heuristic")
+        inds = [Individual(query="Same Query"), Individual(query="same   query")]
+        asyncio.run(ev.evaluate_population(inds))
+        asyncio.run(ev.evaluate_population([Individual(query="same query")]))
+        assert len(calls) == 1
+
+
+def test_concurrent_live_evaluations_keep_their_own_costs():
+    import asyncio
+
+    from searchprobe.adversarial.fitness import FitnessEvaluator
+    from searchprobe.pipeline.cost_tracker import CostTracker
+    from searchprobe.providers.models import SearchResponse
+
+    class Provider:
+        async def search(self, request):
+            cost = float(len(request.query))
+            await asyncio.sleep(0.01 * (5 - len(request.query)))
+            return SearchResponse(provider="p", query=request.query, results=[],
+                                  latency_ms=0, cost_usd=cost)
+
+    class Judge:
+        async def evaluate(self, query_id, query_text, category, search_response):
+            await asyncio.sleep(0.01 * len(query_text))
+
+            class E:
+                cost_usd = 0.5
+                counts_for_quality = True
+                weighted_score = 0.4
+
+            return E()
+
+    tracker = CostTracker(budget_limit=1000)
+    ev = FitnessEvaluator(mode="llm_judge", provider=Provider(), judge=Judge(),
+                          cost_tracker=tracker, max_concurrent=4)
+    population = [Individual(query=q) for q in ["a", "bb", "ccc", "dddd"]]
+    asyncio.run(ev.evaluate_population(population))
+    expected = (1 + 2 + 3 + 4) + 4 * 0.5
+    assert ev.total_cost == pytest.approx(expected)
+    assert tracker.get_total() == pytest.approx(expected)

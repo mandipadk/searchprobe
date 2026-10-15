@@ -16,10 +16,9 @@ def extract_content(html: str, url: str = "", source: str = "web") -> IndexedDoc
     """Extract structured content from HTML."""
     try:
         import trafilatura
+
         content = trafilatura.extract(html) or ""
-        metadata_json = trafilatura.extract(
-            html, output_format="json", include_links=False
-        )
+        metadata_json = trafilatura.extract(html, output_format="json", include_links=False)
     except ImportError:
         content = _basic_extract(html)
         metadata_json = None

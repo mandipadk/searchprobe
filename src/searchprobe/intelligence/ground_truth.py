@@ -193,7 +193,9 @@ class PatternMatchStrategy:
             regex = re.compile(pattern, re.IGNORECASE)
         except re.error:
             return ValidationOutcome(
-                strategy=self.name, passed=False, score=0.0,
+                strategy=self.name,
+                passed=False,
+                score=0.0,
                 explanation=f"Invalid regex: {pattern}",
             )
 

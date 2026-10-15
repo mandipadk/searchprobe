@@ -28,10 +28,13 @@ class FailureMode(str, Enum):
     PARTIAL_CONSTRAINT = "partial_constraint"
     INVERSE_RESULT = "inverse_result"
     TANGENTIAL_RESULT = "tangential_result"
+    WRONG_CONTENT_TYPE = "wrong_content_type"
+    WRONG_LANGUAGE = "wrong_language"
 
     # Meta failures
     NO_RESULTS = "no_results"
     SEARCH_FAILED = "search_failed"
+    JUDGE_FAILED = "judge_failed"
 
 
 FAILURE_ROOT_CAUSES: dict[FailureMode, dict[str, Any]] = {
@@ -40,9 +43,18 @@ FAILURE_ROOT_CAUSES: dict[FailureMode, dict[str, Any]] = {
         "severity": "high",
         "categories": ["negation", "antonym_confusion", "boolean_logic"],
         "indicators": [
-            "not", "never", "no", "without", "non-", "neither", "nor",
-            "violating the negation", "opposite", "ignoring the exclusion",
-            "directly contradicts", "negation constraint",
+            "not",
+            "never",
+            "no",
+            "without",
+            "non-",
+            "neither",
+            "nor",
+            "violating the negation",
+            "opposite",
+            "ignoring the exclusion",
+            "directly contradicts",
+            "negation constraint",
         ],
     },
     FailureMode.NUMERIC_BLINDNESS: {
@@ -50,9 +62,17 @@ FAILURE_ROOT_CAUSES: dict[FailureMode, dict[str, Any]] = {
         "severity": "high",
         "categories": ["numeric_precision", "multi_constraint"],
         "indicators": [
-            "numeric", "number", "exactly", "between", "range",
-            "greater than", "less than", "more than", "fewer than",
-            "wrong number", "incorrect value",
+            "numeric",
+            "number",
+            "exactly",
+            "between",
+            "range",
+            "greater than",
+            "less than",
+            "more than",
+            "fewer than",
+            "wrong number",
+            "incorrect value",
         ],
     },
     FailureMode.TEMPORAL_INSENSITIVITY: {
@@ -60,9 +80,19 @@ FAILURE_ROOT_CAUSES: dict[FailureMode, dict[str, Any]] = {
         "severity": "medium",
         "categories": ["temporal_constraint"],
         "indicators": [
-            "date", "time", "before", "after", "since", "until",
-            "week", "month", "year", "outdated", "wrong period",
-            "temporal", "not recent",
+            "date",
+            "time",
+            "before",
+            "after",
+            "since",
+            "until",
+            "week",
+            "month",
+            "year",
+            "outdated",
+            "wrong period",
+            "temporal",
+            "not recent",
         ],
     },
     FailureMode.SEMANTIC_CONFLATION: {
@@ -70,9 +100,14 @@ FAILURE_ROOT_CAUSES: dict[FailureMode, dict[str, Any]] = {
         "severity": "medium",
         "categories": ["polysemy", "entity_disambiguation"],
         "indicators": [
-            "wrong sense", "ambiguous", "different meaning",
-            "confused with", "mixed up", "wrong entity",
-            "disambiguation", "multiple meanings",
+            "wrong sense",
+            "ambiguous",
+            "different meaning",
+            "confused with",
+            "mixed up",
+            "wrong entity",
+            "disambiguation",
+            "multiple meanings",
         ],
     },
     FailureMode.KEYWORD_LEAKAGE: {
@@ -80,9 +115,14 @@ FAILURE_ROOT_CAUSES: dict[FailureMode, dict[str, Any]] = {
         "severity": "medium",
         "categories": ["instruction_following", "compositional"],
         "indicators": [
-            "keyword", "mentions but", "contains the word",
-            "surface match", "lexical", "not relevant",
-            "only mentions", "tangentially related",
+            "keyword",
+            "mentions but",
+            "contains the word",
+            "surface match",
+            "lexical",
+            "not relevant",
+            "only mentions",
+            "tangentially related",
         ],
     },
     FailureMode.POPULARITY_BIAS: {
@@ -90,8 +130,13 @@ FAILURE_ROOT_CAUSES: dict[FailureMode, dict[str, Any]] = {
         "severity": "low",
         "categories": ["specificity_gradient", "entity_disambiguation"],
         "indicators": [
-            "popular", "well-known", "famous", "dominant",
-            "most common", "mainstream", "generic",
+            "popular",
+            "well-known",
+            "famous",
+            "dominant",
+            "most common",
+            "mainstream",
+            "generic",
         ],
     },
     FailureMode.DOMAIN_MISMATCH: {
@@ -99,9 +144,14 @@ FAILURE_ROOT_CAUSES: dict[FailureMode, dict[str, Any]] = {
         "severity": "low",
         "categories": ["instruction_following"],
         "indicators": [
-            "wrong type", "documentation instead", "blog instead",
-            "forum instead", "not academic", "not a paper",
-            "wrong format", "wrong source type",
+            "wrong type",
+            "documentation instead",
+            "blog instead",
+            "forum instead",
+            "not academic",
+            "not a paper",
+            "wrong format",
+            "wrong source type",
         ],
     },
     FailureMode.PARTIAL_CONSTRAINT: {
@@ -109,9 +159,14 @@ FAILURE_ROOT_CAUSES: dict[FailureMode, dict[str, Any]] = {
         "severity": "high",
         "categories": ["multi_constraint", "boolean_logic"],
         "indicators": [
-            "partial", "some constraints", "only satisfies",
-            "missing constraint", "not all", "one of",
-            "but not", "satisfies only",
+            "partial",
+            "some constraints",
+            "only satisfies",
+            "missing constraint",
+            "not all",
+            "one of",
+            "but not",
+            "satisfies only",
         ],
     },
     FailureMode.INVERSE_RESULT: {
@@ -119,8 +174,13 @@ FAILURE_ROOT_CAUSES: dict[FailureMode, dict[str, Any]] = {
         "severity": "high",
         "categories": ["negation", "antonym_confusion", "counterfactual"],
         "indicators": [
-            "opposite", "inverse", "reversed", "contrary",
-            "directly violating", "antonym", "wrong polarity",
+            "opposite",
+            "inverse",
+            "reversed",
+            "contrary",
+            "directly violating",
+            "antonym",
+            "wrong polarity",
         ],
     },
     FailureMode.TANGENTIAL_RESULT: {
@@ -128,8 +188,13 @@ FAILURE_ROOT_CAUSES: dict[FailureMode, dict[str, Any]] = {
         "severity": "low",
         "categories": ["compositional", "specificity_gradient", "cross_lingual"],
         "indicators": [
-            "tangential", "related but", "adjacent", "nearby topic",
-            "not directly", "loosely related", "off-topic",
+            "tangential",
+            "related but",
+            "adjacent",
+            "nearby topic",
+            "not directly",
+            "loosely related",
+            "off-topic",
         ],
     },
     FailureMode.NO_RESULTS: {
@@ -144,7 +209,32 @@ FAILURE_ROOT_CAUSES: dict[FailureMode, dict[str, Any]] = {
         "categories": [],
         "indicators": ["search_failed", "error", "timeout"],
     },
+    FailureMode.WRONG_CONTENT_TYPE: {
+        "description": "Right topic, wrong kind of document (e.g. docs instead of blog posts)",
+        "severity": "medium",
+        "categories": ["instruction_following"],
+        "indicators": ["wrong type", "not a paper", "documentation instead", "content type"],
+    },
+    FailureMode.WRONG_LANGUAGE: {
+        "description": "Results in the wrong language",
+        "severity": "medium",
+        "categories": ["cross_lingual"],
+        "indicators": ["wrong language", "in english instead", "language mismatch"],
+    },
+    FailureMode.JUDGE_FAILED: {
+        "description": "The judge could not produce a verdict (infrastructure failure)",
+        "severity": "low",
+        "categories": [],
+        "indicators": ["judge_failed", "parse_error", "evaluation_failed"],
+    },
 }
+
+# Failure modes the judge may assign; the meta modes are set by code.
+JUDGE_FAILURE_MODES: list[str] = [
+    m.value
+    for m in FailureMode
+    if m not in (FailureMode.NO_RESULTS, FailureMode.SEARCH_FAILED, FailureMode.JUDGE_FAILED)
+]
 
 
 class FailureClassifier:
@@ -161,8 +251,7 @@ class FailureClassifier:
             for mode, info in FAILURE_ROOT_CAUSES.items()
         }
         self._category_map: dict[FailureMode, list[str]] = {
-            mode: info["categories"]
-            for mode, info in FAILURE_ROOT_CAUSES.items()
+            mode: info["categories"] for mode, info in FAILURE_ROOT_CAUSES.items()
         }
 
     def classify(self, failure_text: str, category: str = "") -> list[FailureMode]:

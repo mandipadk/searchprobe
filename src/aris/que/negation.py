@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import re
 
-
 # Patterns that indicate negation
 _NEGATION_PATTERNS = [
     r"\bNOT\s+(\w+(?:\s+\w+)?)",

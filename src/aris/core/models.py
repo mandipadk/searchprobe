@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import urlparse
 
-from pydantic import BaseModel, Field, HttpUrl
+from pydantic import BaseModel, Field
 
 
 class Document(BaseModel):
@@ -66,7 +66,7 @@ class SearchResult(BaseModel):
         return cls(
             title=doc.title,
             url=doc.url,
-            snippet=doc.snippet or doc.content[:300] if doc.content else "",
+            snippet=doc.snippet or (doc.content[:300] if doc.content else ""),
             score=scored.final_score,
             confidence=scored.confidence,
             constraint_satisfaction=scored.constraint_results,
@@ -85,7 +85,7 @@ class ArisResponse(BaseModel):
     latency_ms: float = Field(default=0.0)
     strategy_used: str = Field(default="")
     predicted_failure_modes: list[str] = Field(default_factory=list)
-    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(UTC))
     error: str | None = None
 
     @property

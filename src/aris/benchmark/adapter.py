@@ -6,17 +6,9 @@ using SearchProbe's adversarial evaluation framework.
 
 from __future__ import annotations
 
-import asyncio
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import ClassVar
-
-from searchprobe.providers.base import SearchProvider
-from searchprobe.providers.models import (
-    SearchRequest,
-    SearchResponse,
-    SearchResult,
-)
 
 from aris.agent.search_agent import SearchAgent
 from aris.core.config import ArisConfig
@@ -26,6 +18,12 @@ from aris.ranking.engine import RankingEngine
 from aris.retrieval.engine import RetrievalEngine
 from aris.sources.registry import SourceRegistry
 from aris.verification.engine import ConstraintVerificationEngine
+from searchprobe.providers.base import SearchProvider
+from searchprobe.providers.models import (
+    SearchRequest,
+    SearchResponse,
+    SearchResult,
+)
 
 
 class ArisSearchProvider(SearchProvider):
@@ -61,7 +59,11 @@ class ArisSearchProvider(SearchProvider):
         self._verification = ConstraintVerificationEngine()
         self._ranking = RankingEngine(self._config)
         self._agent = SearchAgent(
-            self._config, self._que, self._retrieval, self._verification, self._ranking,
+            self._config,
+            self._que,
+            self._retrieval,
+            self._verification,
+            self._ranking,
         )
 
     async def search(self, request: SearchRequest) -> SearchResponse:
@@ -83,18 +85,20 @@ class ArisSearchProvider(SearchProvider):
             for i, r in enumerate(aris_response.results):
                 content = None
                 if request.include_content:
-                    content = r.snippet[:request.max_content_chars]
+                    content = r.snippet[: request.max_content_chars]
 
-                results.append(SearchResult(
-                    title=r.title,
-                    url=r.url,
-                    snippet=r.snippet[:300],
-                    content=content,
-                    score=r.score,
-                    published_date=r.published_date,
-                    source_domain=SearchResult.extract_domain(r.url),
-                    position=i,
-                ))
+                results.append(
+                    SearchResult(
+                        title=r.title,
+                        url=r.url,
+                        snippet=r.snippet[:300],
+                        content=content,
+                        score=r.score,
+                        published_date=r.published_date,
+                        source_domain=SearchResult.extract_domain(r.url),
+                        position=i,
+                    )
+                )
 
             return SearchResponse(
                 provider=self.NAME,
@@ -103,7 +107,7 @@ class ArisSearchProvider(SearchProvider):
                 results=results,
                 latency_ms=latency_ms,
                 cost_usd=self.COST_PER_QUERY.get(mode, 0.005),
-                timestamp=datetime.now(timezone.utc),
+                timestamp=datetime.now(UTC),
                 metadata={
                     "iterations": aris_response.iterations,
                     "total_candidates": aris_response.total_candidates,
@@ -121,7 +125,7 @@ class ArisSearchProvider(SearchProvider):
                 results=[],
                 latency_ms=latency_ms,
                 cost_usd=0.0,
-                timestamp=datetime.now(timezone.utc),
+                timestamp=datetime.now(UTC),
                 error=str(e),
             )
 
